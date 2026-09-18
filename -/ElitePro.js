@@ -937,12 +937,11 @@ case 'chatgpt': {
             },
             { quoted: m }
         );
-        const apiUrl = `https://eliteprotech-apis.zone.id/ai/chatgpt?prompt=${encodeURIComponent(userMessage)}`;
+        const apiUrl = `https://eliteprotech-apis.zone.id/ai/notegpt?prompt=${encodeURIComponent(userMessage)}`;
         const { data } = await axios.get(apiUrl, {
             timeout: 60000
         });
-
-        if (!data?.success || !data?.response) {
+        if (!data?.success || !data?.text) {
             return await EliteProTech.sendMessage(
                 m.chat,
                 {
@@ -951,7 +950,7 @@ case 'chatgpt': {
                 }
             );
         }
-        const finalText = data.response;
+        const finalText = data.text;
         await EliteProTech.sendMessage(
             m.chat,
             {
@@ -961,7 +960,6 @@ case 'chatgpt': {
         );
     } catch (err) {
         console.error('GPT Error:', err);
-
         reply('❌ AI failed to respond.');
     }
     break;
