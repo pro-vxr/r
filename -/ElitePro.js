@@ -37,7 +37,7 @@ function saveSettings() {
     fs.writeFileSync(settingsFile, JSON.stringify({
         autoviewstatus: global.autoviewstatus,
         autolikestatus: global.autolikestatus,
-        autolikestatusEmoji: global.autolikestatusEmoji || '❤️',
+        autolikestatusEmoji: global.autolikestatusEmoji || '💚',
         autoread: global.autoread,
         autoTyping: global.autoTyping,
         autoRecording: global.autoRecording,
@@ -2169,7 +2169,7 @@ case 'autolikestatus': {
         global.autolikestatus = true
         if (args.slice(1).join(' ').trim()) global.autolikestatusEmoji = args.slice(1).join(' ').trim()
         saveSettings()
-        return reply(`✅ Auto status like enabled with ${global.autolikestatusEmoji || '❤️'}`)
+        return reply(`✅ Auto status like enabled with ${global.autolikestatusEmoji || '💚'}`)
     }
     if (option === 'off') {
         global.autolikestatus = false
@@ -2177,9 +2177,9 @@ case 'autolikestatus': {
         return reply('❌ Auto status like disabled')
     }
     if (option === 'default') {
-        global.autolikestatusEmoji = '❤️'
+        global.autolikestatusEmoji = '💚'
         saveSettings()
-        return reply('✅ Auto status like emoji reset to ❤️')
+        return reply('✅ Auto status like emoji reset to 💚')
     }
     return reply(`Usage:\n${prefix}autolikestatus on [emoji]\n${prefix}autolikestatus off\n${prefix}autolikestatus default`)
 }
@@ -2193,7 +2193,7 @@ case 'autoviewlike': {
         global.autolikestatus = true
         if (args.slice(1).join(' ').trim()) global.autolikestatusEmoji = args.slice(1).join(' ').trim()
         saveSettings()
-        return reply(`✅ Auto view and like enabled with ${global.autolikestatusEmoji || '❤️'}`)
+        return reply(`✅ Auto view and like enabled with ${global.autolikestatusEmoji || '💚'}`)
     }
     if (option === 'off') {
         global.autoviewstatus = false
@@ -6052,8 +6052,8 @@ if (!isCreator) return reply(mess.owner)
 let txt = `⚙️ *ELITEPRO BOT SETTINGS*\n`
 txt += `╭───────────────━⊷\n`
 txt += `┃ 📊 Auto Status View : ${autoviewstatus ? "✅ ON" : "❌ OFF"}\n`
-txt += `┃ ❤️ Auto Status Like : ${autolikestatus ? `✅ ON (${global.autolikestatusEmoji || '❤️'})` : "❌ OFF"}\n`
-txt += `┃ 👀❤️ Auto View Like : ${autoviewstatus && autolikestatus ? "✅ ON" : "❌ OFF"}\n`
+txt += `┃ 💚' Auto Status Like : ${autolikestatus ? `✅ ON (${global.autolikestatusEmoji || '💚'})` : "❌ OFF"}\n`
+txt += `┃ 👀💚' Auto View Like : ${autoviewstatus && autolikestatus ? "✅ ON" : "❌ OFF"}\n`
 txt += `┃ 📖 Auto Read        : ${autoread ? "✅ ON" : "❌ OFF"}\n`
 txt += `┃ ⌨️ Auto Typing      : ${autoTyping ? "✅ ON" : "❌ OFF"}\n`
 txt += `┃ 🎙️ Auto Recording   : ${autoRecording ? "✅ ON" : "❌ OFF"}\n`
