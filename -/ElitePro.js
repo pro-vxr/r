@@ -6263,22 +6263,31 @@ case 'aivoice': {
         if (m.quoted && m.quoted.text) {
             query = query ? query + ' ' + m.quoted.text : m.quoted.text;
         }
-        if (!query) {
-            return reply(`Example: .aivoice Hello or reply to a message`);
-        }
+        if (!query) return reply(`Example: .aivoice Hello or reply to a message`);
         await EliteProTech.sendPresenceUpdate('recording', m.chat);
-        const aiRes = await axios.get(
-            `https://eliteprotech-apis.zone.id/ai/gpt?prompt=${encodeURIComponent(query)}`
-        );
-        if (!aiRes.data?.success || !aiRes.data?.response) {
+        const aiRes = await axios.get(`https://api.bk9.dev/ai/copilot?q=${encodeURIComponent(query)}`);
+        if (!aiRes.data?.status || !aiRes.data?.BK9?.response) {
             return reply('❌ Failed to generate AI response.');
         }
-        const aiText = aiRes.data.response.slice(0, 1000);
-        const voiceRes = await axios.get(
-            `https://apis.davidcyril.name.ng/tools/speechma?text=${encodeURIComponent(aiText)}&voice=Andrew&pitch=2&rate=1`,
-            { responseType: 'arraybuffer' }
-        );
-        const voice = await toPTT(Buffer.from(voiceRes.data), 'mp3');
+        let text = aiRes.data.BK9.response.slice(0, 1000);
+        text = text
+            .replace(/```[\s\S]*?```/g, '')
+            .replace(/^\s*#{1,6}\s*/gm, '')
+            .replace(/^\s*\/\/\s?/gm, '')
+            .replace(/\*\*(.*?)\*\*/g, '$1')
+            .replace(/\*(.*?)\*/g, '$1')
+            .replace(/__(.*?)__/g, '$1')
+            .replace(/_(.*?)_/g, '$1')
+            .replace(/`([^`]+)`/g, '$1')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+        if (!text) return reply('❌ No readable text was generated.');
+        const voiceRes = await axios.get(`https://ab-text-voice.abrahamdw882.workers.dev/?q=${encodeURIComponent(text)}&voicename=jane`);
+        if (!voiceRes.data?.url) return reply('❌ Failed to generate voice.');
+        const res = await axios.get(voiceRes.data.url, {
+            responseType: 'arraybuffer'
+        });
+        const voice = await toPTT(Buffer.from(res.data), 'mp3');
         await EliteProTech.sendMessage(
             m.chat,
             {
@@ -8028,13 +8037,7 @@ break
 case 'mode': {
     if (!isCreator) return reply(mess.owner);
 
-    if (!text) return reply(`*✅ Current Mode:* ${EliteProTech.public ? 'public' : 'private'}
-
-🤖 You can switch between *Private* and *Public* mode.
-
-*BOT OPTIONS*
-1. ${prefix}mode private → PRIVATE  
-2. ${prefix}mode public → PUBLIC`);
+    if (!text) return reply(`Mode: ${EliteProTech.public ? 'public' : 'private'} | Options: ${prefix}mode private → PRIVATE, ${prefix}mode public → PUBLIC`);
 
     let input = text.toLowerCase();
 
@@ -8054,7 +8057,7 @@ case 'mode': {
         }
     });
 
-    return reply(`_*Mode successfully changed to ${input}*_`);
+    return reply(`Mode successfully changed to ${input}`);
 }
 break
             case 'setexif':
