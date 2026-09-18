@@ -1425,8 +1425,6 @@ case 'vvdm': {
         
     } catch (error) {
         console.error("Error opening view-once message:", error);
-        
-        // React ❌ on failure
         await EliteProTech.sendMessage(m.chat, {
             react: { text: "❌", key: m.key }
         });
@@ -1435,49 +1433,31 @@ case 'vvdm': {
 break
 case 'song': {
     if (!text) return reply(`*Example*: ${prefix + command} Faded by Alan Walker or YouTube URL`);
-
     try {
         await EliteProTech.sendMessage(m.chat, {
             react: { text: `🎶`, key: m.key }
         });
-
         let videoUrl;
         let videoTitle;
         let video;
-        
         const urlRegex = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+$/;
-
         if (urlRegex.test(text)) {
             const search = await yts(text);
             video = search.videos[0];
-
-            if (!video) {
-                return reply(`❌ Could not retrieve video info from URL.`);
-            }
-
+            if (!video) return reply(`❌ Could not retrieve video info from URL.`);
             videoUrl = text;
         } else {
             const search = await yts(text);
             video = search.videos[0];
-
-            if (!video) {
-                return reply(`❌ No results found for: ${text}`);
-            }
-
+            if (!video) return reply(`❌ No results found for: ${text}`);
             videoUrl = video.url;
         }
-
         videoTitle = video.title;
-
-        const apiUrl = `https://eliteprotech-apis.zone.id/download/ytaudio?url=${encodeURIComponent(videoUrl)}`;
-
+        const apiUrl = `https://eliteprotech-apis.zone.id/download/ytmp3?url=${encodeURIComponent(videoUrl)}`;
         const { data } = await axios.get(apiUrl);
-
-        if (data?.success && data?.result?.url) {
-
-            const downloadUrl = data.result.url;
-            const filename = data.result.filename || `${videoTitle}.mp3`;
-
+        if (data?.status && data?.download?.downloadUrl) {
+            const downloadUrl = data.download.downloadUrl;
+            const filename = `${data.download.title || videoTitle}.mp3`;
             const response = await axios.get(downloadUrl, {
                 responseType: 'arraybuffer',
                 headers: {
@@ -1485,9 +1465,7 @@ case 'song': {
                     'Accept': 'audio/mpeg,*/*'
                 }
             });
-
             const audioBuffer = Buffer.from(response.data);
-
             await EliteProTech.sendMessage(m.chat, {
                 document: audioBuffer,
                 fileName: filename,
@@ -1498,25 +1476,19 @@ case 'song': {
                     isForwarded: true
                 }
             }, { quoted: m });
-
             await EliteProTech.sendMessage(m.chat, {
                 react: { text: `✅`, key: m.key }
             });
-
         } else {
             reply(`❌ Failed to fetch the song from API.`);
         }
-
     } catch (error) {
         console.error('Song Downloader Error:', error);
-
         await EliteProTech.sendMessage(m.chat, {
             react: { text: `❌`, key: m.key }
         });
-
         reply(`❌ An error occurred while downloading.`);
     }
-
     break;
 }
 case 'animeavatar': {
