@@ -44,6 +44,7 @@ function saveSettings() {
         autorecordtype: global.autorecordtype,
         autobio: global.autobio,
         autoreact: global.autoreact,
+        prefix: global.prefix,
         mode: global.botMode || 'private'
     }, null, 2))
 }
@@ -4825,6 +4826,7 @@ case 'prefix': {
 
     if (newPrefix.toLowerCase() === 'none') {
         global.prefix = '';
+        saveSettings();
 
         return reply(
             `✅ Prefix removed.\n\n` +
@@ -4838,6 +4840,7 @@ case 'prefix': {
     }
 
     global.prefix = newPrefix;
+    saveSettings();
 
     return reply(`✅ Prefix updated to *${global.prefix}*`);
 }
