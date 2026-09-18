@@ -257,7 +257,7 @@ async function handleStatusWatcher(EliteProTech, mek) {
 
         if (!global.autolikestatus) return
 
-        const emoji = global.autolikestatusEmoji || '❤️'
+        const emoji = global.autolikestatusEmoji || '💚'
 
         await EliteProTech.sendMessage(
             'status@broadcast',
