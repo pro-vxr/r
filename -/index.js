@@ -26,7 +26,7 @@ require('./config')
 let savedSettings = {}
 try {
     savedSettings = JSON.parse(fs.readFileSync('./database/settings.json', 'utf8'))
-    for (const key of ['autoviewstatus', 'autolikestatus', 'autolikestatusEmoji', 'autoread', 'autoTyping', 'autoRecording', 'autorecordtype', 'autobio', 'autoreact']) {
+    for (const key of ['prefix', 'autoviewstatus', 'autolikestatus', 'autolikestatusEmoji', 'autoread', 'autoTyping', 'autoRecording', 'autorecordtype', 'autobio', 'autoreact']) {
         if (savedSettings[key] !== undefined) global[key] = savedSettings[key]
     }
 } catch {}
