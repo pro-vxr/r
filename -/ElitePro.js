@@ -3101,7 +3101,7 @@ case 'update': {
     const repo = 'ELITE-PRO-V1'
     const branch = 'main'
     const foldersToUpdate = ['lib']
-    const filesToUpdate = ['package.json', 'ElitePro.js', 'index.js']
+    const filesToUpdate = ['package.json']
     const localBasePath = __dirname
     async function downloadFolder(folderPath, localPath) {
         const url = `https://api.github.com/repos/${user}/${repo}/contents/${folderPath}?ref=${branch}`
