@@ -1000,7 +1000,7 @@ EliteProTech.ev.on("connection.update", async (s) => {
                 connectedMessageSent = true
 
                 const botJid = EliteProTech.decodeJid(EliteProTech.user.id)
-                EliteProTech.sendMessage(botJid, {
+                await EliteProTech.sendMessage(botJid, {
                     text: `*✅ ELITE-PRO-V1 is now connected and online!* Bot Prefix: ${global.prefix || '.'} | Mode: ${modeData.mode}\n\n*Join us:* https://t.me/eliteprotechs`
                 }).catch(() => {})
             }
