@@ -31,9 +31,31 @@ try {
     }
 } catch {}
 global.botMode = savedSettings.mode || 'private'
+
+function parseSessionId(sessionId) {
+    const value = String(sessionId || '').trim()
+    const base64Value = value
+        .replace(/^data:application\/json;base64,/i, '')
+        .replace(/^base64:/i, '')
+    const candidates = [value]
+
+    if (base64Value !== value || /^[A-Za-z0-9+/_=-]+$/.test(base64Value)) {
+        candidates.push(Buffer.from(base64Value, 'base64').toString('utf8'))
+    }
+
+    for (const candidate of candidates) {
+        try {
+            const parsed = JSON.parse(candidate)
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed
+        } catch {}
+    }
+
+    throw new Error('SESSION_ID must contain credentials JSON or Base64-encoded credentials JSON')
+}
+
 if (!fs.existsSync(__dirname + '/session/creds.json') && global.sessionid) {
     try {
-        const sessionData = JSON.parse(global.sessionid);
+        const sessionData = parseSessionId(global.sessionid);
         fs.mkdirSync(__dirname + '/session', { recursive: true });
         fs.writeFileSync(__dirname + '/session/creds.json', JSON.stringify(sessionData, null, 2));
     } catch (err) {
@@ -47,7 +69,7 @@ const axios = require('axios')
 const PhoneNumber = require('awesome-phonenumber')
 const { imageToWebp, videoToWebp, writeExifImg, writeExifVid } = require('./lib/exif')
 const { smsg, isUrl, generateMessageTag, getBuffer, getSizeMedia, fetch, sleep, reSize, getGroupAdmins } = require('./lib/myfunc')
-const { default: EliteProTechConnect, delay, PHONENUMBER_MCC, makeCacheableSignalKeyStore, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, generateForwardMessageContent, prepareWAMessageMedia, generateWAMessageFromContent, generateMessageID, downloadContentFromMessage, makeInMemoryStore, jidDecode, proto } = require("baileys")
+const { default: EliteProTechConnect, delay, makeCacheableSignalKeyStore, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, generateForwardMessageContent, prepareWAMessageMedia, generateWAMessageFromContent, generateMessageID, downloadContentFromMessage, makeInMemoryStore, jidDecode, proto } = require("baileys")
 const NodeCache = require("node-cache")
 const Pino = require("pino")
 const readline = require("readline")
@@ -106,27 +128,45 @@ const store = {
 let owner = JSON.parse(fs.readFileSync('./database/owner.json'))
 let connectedMessageSent = false
 
-const configuredPairingNumber = process.env.PAIRING_NUMBER || ''
-const pairingCode = !!configuredPairingNumber || process.argv.includes("--pairing-code")
 const useMobile = process.argv.includes("--mobile")
 const hasInteractiveTerminal = Boolean(process.stdin.isTTY && process.stdout.isTTY)
+const pairingCode = process.argv.includes("--pairing-code") || hasInteractiveTerminal
 
 let rl
 const question = (text) => {
    if (!hasInteractiveTerminal) {
       return Promise.reject(new Error('Interactive terminal input is unavailable'))
    }
-   rl ??= readline.createInterface({ input: process.stdin, output: process.stdout })
+   if (!rl || rl.closed) rl = readline.createInterface({ input: process.stdin, output: process.stdout })
    return new Promise((resolve) => rl.question(text, resolve))
+}
+
+async function promptForPairingNumber() {
+   while (true) {
+      const phoneNumber = (await question(chalk.green('Enter your number below Eg, 234xxxxxxxxxx\n'))).replace(/[^0-9]/g, '')
+      if (process.stdout.isTTY) process.stdout.write('\x1b[1A\x1b[2K\r')
+      if (/^[1-9]\d{6,14}$/.test(phoneNumber)) return phoneNumber
+      console.log(chalk.red('Enter a valid number with country code. Eg, 234xxxxxxxxxx'))
+   }
 }
 
 async function startEliteProTech() {
 let { version, isLatest } = await fetchLatestBaileysVersion()
 const {  state, saveCreds } =await useMultiFileAuthState(`./session`)
-   if (!state.creds.registered && !pairingCode && !hasInteractiveTerminal) {
+   if (!state.creds.registered && state.creds.pairingCode) {
+      delete state.creds.pairingCode
+      delete state.creds.me
+      await saveCreds()
+   }
+   if (!state.creds.registered && !hasInteractiveTerminal) {
       console.error('No session detected. Add SESSION_ID to your .env variables or config.js, then restart the bot.')
       return
    }
+   const needsPairing = pairingCode && !state.creds.registered
+   let pairingPhoneNumber = null
+   let pairingCodeRequested = false
+   let awaitingNumber = false
+   let reconnecting = false
     const msgRetryCounterCache = new NodeCache()
     const groupMetadataCache = new NodeCache({ stdTTL: 5 * 60, useClones: false })
     const handledMessages = new Set()
@@ -134,7 +174,6 @@ const {  state, saveCreds } =await useMultiFileAuthState(`./session`)
     const EliteProTech = makeWASocket({
         version,
         logger: pino({ level: 'silent' }),
-        printQRInTerminal: !pairingCode, 
         browser: [ "Ubuntu", "Chrome", "20.0.04" ],
         auth: {
         creds: state.creds,
@@ -178,40 +217,27 @@ const {  state, saveCreds } =await useMultiFileAuthState(`./session`)
 
    store.bind(EliteProTech.ev)
 
-   if (pairingCode && !EliteProTech.authState.creds.registered) {
+   if (needsPairing) {
       if (useMobile) throw new Error('Cannot use pairing code with mobile api')
-      if (!configuredPairingNumber && !hasInteractiveTerminal) {
-         console.error('No session detected. Add SESSION_ID to your .env variables or config.js, then restart the bot.')
-         return
+      awaitingNumber = true
+      try {
+         pairingPhoneNumber = await promptForPairingNumber()
+         pairingCodeRequested = true
+         console.log(chalk.green(`Requesting code for: ${pairingPhoneNumber}`))
+         setTimeout(async () => {
+            try {
+               const code = await EliteProTech.requestPairingCode(pairingPhoneNumber)
+               console.log(chalk.yellow(`Your Pairing Code: ${code?.match(/.{1,4}/g)?.join("-") || code}`))
+            } catch (err) {
+               pairingCodeRequested = false
+               if (!reconnecting) console.log(chalk.red('Unable to request a pairing code. Waiting to reconnect...'))
+            }
+         }, 3000)
+      } catch (err) {
+         if (!reconnecting) console.log(chalk.red('Unable to read the pairing number. Waiting to reconnect...'))
+      } finally {
+         awaitingNumber = false
       }
-
-      let phoneNumber = configuredPairingNumber
-      if (!!phoneNumber) {
-         phoneNumber = phoneNumber.replace(/[^0-9]/g, '')
-
-         if (!Object.keys(PHONENUMBER_MCC).some(v => phoneNumber.startsWith(v))) {
-            console.log(chalk.bgBlack(chalk.redBright("Start with country code of your WhatsApp Number, Example : +2347047504860")))
-            process.exit(0)
-         }
-      } else {
-         phoneNumber = await question(chalk.bgBlack(chalk.greenBright(`Please type your number below 🥰.\nFor example +2347047504860: `)))
-         phoneNumber = phoneNumber.replace(/[^0-9]/g, '')
-
-         // Ask again when entering the wrong number
-         if (phoneNumber == "rien" ){
-            console.log(chalk.bgBlack(chalk.redBright("Start with country code of your WhatsApp Number, Example : +2347047504860")))
-
-            phoneNumber = await question(chalk.bgBlack(chalk.greenBright(`Please type your WhatsApp number. 🥰\nFor example: +2347047504860 : `)))
-            phoneNumber = phoneNumber.replace(/[^0-9]/g, '')
-            rl.close()
-         }
-      }
-
-      setTimeout(async () => {
-         let code = await EliteProTech.requestPairingCode(phoneNumber)
-         code = code?.match(/.{1,4}/g)?.join("-") || code
-         console.log(chalk.black(chalk.bgGreen(`Your Pairing Code : `)), chalk.black(chalk.white(code)))
-      }, 3000)
    }
 //AUTO STATUS WATCHER//
 const processedStatusMessages = new Set()
@@ -1025,16 +1051,23 @@ if (
     lastDisconnect &&
     lastDisconnect.error
 ) {
+    if (reconnecting) return
+    reconnecting = true
+    if (awaitingNumber && rl && !rl.closed) rl.close()
     const statusCode = lastDisconnect.error.output?.statusCode;
 
     if (statusCode === 401) {
         console.log(chalk.red("❌ Your device was logged out. Please Re-pair."));
     } else {
+        if (pairingCodeRequested && !EliteProTech.authState.creds.registered) {
+            console.log(chalk.yellow('Pairing code expired. Please enter your number again.'))
+        }
+        await new Promise(resolve => setTimeout(resolve, 1000))
         return startEliteProTech();
     }
 }      
    })
-    EliteProTech.ev.on('creds.update', saveCreds)
+   EliteProTech.ev.on('creds.update', saveCreds)
 
     EliteProTech.sendText = (jid, text, quoted = '', options) => EliteProTech.sendMessage(jid, {
         text: text,
