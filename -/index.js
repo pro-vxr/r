@@ -103,19 +103,30 @@ const store = {
     return this.messages[jid]?.[id] || null
     }
 }
-let phoneNumber = "2347047504860"
 let owner = JSON.parse(fs.readFileSync('./database/owner.json'))
 let connectedMessageSent = false
 
-const pairingCode = !!phoneNumber || process.argv.includes("--pairing-code")
+const configuredPairingNumber = process.env.PAIRING_NUMBER || ''
+const pairingCode = !!configuredPairingNumber || process.argv.includes("--pairing-code")
 const useMobile = process.argv.includes("--mobile")
+const hasInteractiveTerminal = Boolean(process.stdin.isTTY && process.stdout.isTTY)
 
-const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
-const question = (text) => new Promise((resolve) => rl.question(text, resolve))
+let rl
+const question = (text) => {
+   if (!hasInteractiveTerminal) {
+      return Promise.reject(new Error('Interactive terminal input is unavailable'))
+   }
+   rl ??= readline.createInterface({ input: process.stdin, output: process.stdout })
+   return new Promise((resolve) => rl.question(text, resolve))
+}
 
 async function startEliteProTech() {
 let { version, isLatest } = await fetchLatestBaileysVersion()
 const {  state, saveCreds } =await useMultiFileAuthState(`./session`)
+   if (!state.creds.registered && !pairingCode && !hasInteractiveTerminal) {
+      console.error('No session detected. Add SESSION_ID to your .env variables or config.js, then restart the bot.')
+      return
+   }
     const msgRetryCounterCache = new NodeCache()
     const groupMetadataCache = new NodeCache({ stdTTL: 5 * 60, useClones: false })
     const handledMessages = new Set()
@@ -169,8 +180,12 @@ const {  state, saveCreds } =await useMultiFileAuthState(`./session`)
 
    if (pairingCode && !EliteProTech.authState.creds.registered) {
       if (useMobile) throw new Error('Cannot use pairing code with mobile api')
+      if (!configuredPairingNumber && !hasInteractiveTerminal) {
+         console.error('No session detected. Add SESSION_ID to your .env variables or config.js, then restart the bot.')
+         return
+      }
 
-      let phoneNumber
+      let phoneNumber = configuredPairingNumber
       if (!!phoneNumber) {
          phoneNumber = phoneNumber.replace(/[^0-9]/g, '')
 
