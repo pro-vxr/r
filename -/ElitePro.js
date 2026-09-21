@@ -315,12 +315,11 @@ if (!q) return reply(`What do you want to define?`)
 try {
 targetfine = await axios.get(`http://api.urbandictionary.com/v0/define?term=${q}`)
 if (!targetfine) return reply(mess.error)
-const reply = `
-*${themeemoji} Word:* ${q}
-*${themeemoji} Definition:* ${targetfine.data.list[0].definition
+const reply = `Word:* ${q}
+Definition:* ${targetfine.data.list[0].definition
     .replace(/\[/g, "")
     .replace(/\]/g, "")}
-*${themeemoji} Example:* ${targetfine.data.list[0].example
+Example:* ${targetfine.data.list[0].example
     .replace(/\[/g, "")
     .replace(/\]/g, "")}`
    EliteProTech.sendMessage(m.chat,{text:reply},{quoted:m})
@@ -716,12 +715,12 @@ case 'getgrouppp': case 'groupprofile': {
 break
 case 'quotes':
 const quoteelitey = await axios.get(`https://favqs.com/api/qotd`)
-        const textquotes = `*${themeemoji} Quote:* ${quoteelitey.data.quote.body}\n\n*${themeemoji} Author:* ${quoteelitey.data.quote.author}`
+        const textquotes = `*Quote:* ${quoteelitey.data.quote.body}\n\nAuthor:* ${quoteelitey.data.quote.author}`
 return reply(textquotes)
 break
 case 'fact': {
     	const { data } = await axios.get(`https://nekos.life/api/v2/fact`)
-        return reply(`${themeemoji} *Fact:* ${data.fact}\n`)   
+        return reply(`*Fact:* ${data.fact}\n`)   
 }
 break
 case 'play':
