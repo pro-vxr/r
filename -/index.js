@@ -1,28 +1,44 @@
 const { spawn } = require("child_process");
 if (process.argv[2] !== "--child") {
+    let childProcess;
+    let shuttingDown = false;
     
     function launch() {
-        let p = spawn("node", ["index.js", "--child"], {
+        childProcess = spawn("node", ["index.js", "--child"], {
             stdio: ["inherit", "inherit", "inherit", "ipc"]
         });
         
-        p.on("message", (msg) => {
+        childProcess.on("message", (msg) => {
             if (msg === "reset") {
-                p.kill();
+                childProcess.kill();
                 launch();
             }
         });
         
-        p.on("exit", (code) => {
+        childProcess.on("exit", (code) => {
+            if (shuttingDown) process.exit(code ?? 0);
             if (code === 0 || code === 1) launch();
         });
     }
+
+    const shutdown = (signal) => {
+        shuttingDown = true;
+        if (childProcess) childProcess.kill(signal);
+        else process.exit(0);
+        setTimeout(() => process.exit(0), 12000).unref();
+    };
+
+    process.once("SIGINT", () => shutdown("SIGINT"));
+    process.once("SIGTERM", () => shutdown("SIGTERM"));
     launch();
     return;
 }
 const path = require('path');
 const fs = require('fs');
 require('./config')
+const BOT_ID = 'elite-pro-v1'
+const SETTINGS_FILE = path.join(__dirname, 'database', 'settings.json')
+const OWNER_FILE = path.join(__dirname, 'database', 'owner.json')
 let savedSettings = {}
 try {
     savedSettings = JSON.parse(fs.readFileSync('./database/settings.json', 'utf8'))
@@ -31,6 +47,102 @@ try {
     }
 } catch {}
 global.botMode = savedSettings.mode || 'private'
+
+function isPlainObject(value) {
+    return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function applyBotSettings(settings) {
+    if (!isPlainObject(settings)) return
+    for (const key of ['prefix', 'autoviewstatus', 'autolikestatus', 'autolikestatusEmoji', 'autoread', 'autoTyping', 'autoRecording', 'autorecordtype', 'autobio', 'autoreact']) {
+        if (settings[key] !== undefined) global[key] = settings[key]
+    }
+    if (settings.mode !== undefined) global.botMode = settings.mode
+}
+
+function readJson(file, fallback) {
+    try { return JSON.parse(fs.readFileSync(file, 'utf8')) } catch { return fallback }
+}
+
+function getDatabaseIdentity(jid) {
+    return String(jid || '').replace(/:\d+(?=@)/, '').replace(/\D/g, '')
+}
+
+function settingsApiUrl(pathname) {
+    const base = String(global.dbSite || '').trim().replace(/\/+$/, '')
+    return base ? `${base}${pathname}` : ''
+}
+
+let remoteSettingsRestored = false
+let remoteSettingsNumber = ''
+let remoteBackupInFlight = null
+
+global.backupBotData = async () => {
+    if (!remoteSettingsNumber || !global.dbSite) return false
+    if (remoteBackupInFlight) return remoteBackupInFlight
+
+    const url = settingsApiUrl(`/api/botsettings/${encodeURIComponent(remoteSettingsNumber)}/${BOT_ID}`)
+    const payload = {
+        settings: {
+            botSettings: readJson(SETTINGS_FILE, {}),
+            owners: readJson(OWNER_FILE, [])
+        }
+    }
+    remoteBackupInFlight = axios.put(url, payload, { timeout: 10000 })
+        .then(() => true)
+        .catch((err) => {
+            console.warn(`Settings backup failed: ${err.message}`)
+            return false
+        })
+        .finally(() => { remoteBackupInFlight = null })
+    return remoteBackupInFlight
+}
+
+function watchBackupFile(file) {
+    fs.watchFile(file, { interval: 1000 }, (current, previous) => {
+        if (current.mtimeMs !== previous.mtimeMs) void global.backupBotData?.()
+    })
+}
+
+watchBackupFile(SETTINGS_FILE)
+watchBackupFile(OWNER_FILE)
+
+async function restoreBotData(jid) {
+    if (remoteSettingsRestored || !global.dbSite) return
+    const number = getDatabaseIdentity(jid)
+    if (!number) return
+    remoteSettingsNumber = number
+
+    try {
+        const url = settingsApiUrl(`/api/botsettings/${encodeURIComponent(number)}/${BOT_ID}`)
+        const { data } = await axios.get(url, { timeout: 10000 })
+        const backup = data?.settings
+        if (!isPlainObject(backup?.botSettings) || !Array.isArray(backup?.owners)) {
+            throw new Error('Remote backup has an invalid format')
+        }
+
+        fs.writeFileSync(SETTINGS_FILE, JSON.stringify(backup.botSettings, null, 2))
+        fs.writeFileSync(OWNER_FILE, JSON.stringify(backup.owners, null, 2))
+        savedSettings = backup.botSettings
+        applyBotSettings(backup.botSettings)
+        remoteSettingsRestored = true
+        delete require.cache[require.resolve('./ElitePro')]
+        EliteProHandler = require('./ElitePro')
+        console.log('Settings backup restored')
+    } catch (err) {
+        if (err.response?.status !== 404) console.warn(`Settings restore failed: ${err.message}`)
+        remoteSettingsRestored = true
+        await global.backupBotData()
+    }
+}
+
+async function backupBeforeShutdown() {
+    await global.backupBotData?.()
+    process.exit(0)
+}
+
+process.once('SIGINT', backupBeforeShutdown)
+process.once('SIGTERM', backupBeforeShutdown)
 
 function parseSessionId(sessionId) {
     const value = String(sessionId || '').trim()
@@ -75,7 +187,7 @@ const Pino = require("pino")
 const readline = require("readline")
 const { parsePhoneNumber } = require("libphonenumber-js")
 const makeWASocket = require("baileys").default
-const EliteProHandler = require("./ElitePro")
+let EliteProHandler = require("./ElitePro")
 const setupConsoleFilters = require('./lib/filter')
 const http = require('http')
 setupConsoleFilters()
@@ -125,8 +237,7 @@ const store = {
     return this.messages[jid]?.[id] || null
     }
 }
-let owner = JSON.parse(fs.readFileSync('./database/owner.json'))
-let connectedMessageSent = false
+let owner = readJson(OWNER_FILE, [])
 
 const useMobile = process.argv.includes("--mobile")
 const hasInteractiveTerminal = Boolean(process.stdin.isTTY && process.stdout.isTTY)
@@ -1032,19 +1143,14 @@ EliteProTech.serializeM = (m) => smsg(EliteProTech, m, store)
 EliteProTech.ev.on("connection.update", async (s) => {
         const { connection, lastDisconnect } = s
         if (connection == "open") {
+            await restoreBotData(EliteProTech.user?.id)
+            modeData.mode = global.botMode
+            EliteProTech.public = global.botMode === 'public'
             console.log(chalk.yellow(`]`));
             console.log(chalk.yellow(`✅  ${botname} is now Connected`));
             console.log(chalk.cyan(`Logged in as: ${EliteProTech.user?.name || 'Unknown'} (${EliteProTech.user?.id?.split(':')[0]})`));
             console.log(chalk.yellow(`]`));
 
-            if (!connectedMessageSent) {
-                connectedMessageSent = true
-
-                const botJid = EliteProTech.decodeJid(EliteProTech.user.id)
-                await EliteProTech.sendMessage(botJid, {
-                    text: `*✅ ELITE-PRO-V1 is now connected and online!* Bot Prefix: ${global.prefix || '.'} | Mode: ${modeData.mode}\n\n*Join us:* https://t.me/eliteprotechs`
-                }).catch(() => {})
-            }
         }
 if (
     connection === "close" &&
