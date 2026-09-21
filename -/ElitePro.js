@@ -7172,7 +7172,7 @@ case 'audiospeed': {
 break
 case 'shell':
 case '$': {
-    if (!isCreator) return reply('❌ Owner only command')
+    if (!isCreator) return;
     if (!q) return reply(`⚠️ Provide a command\n\nExample:\n${prefix + command} ls`)
     try {
         await EliteProTech.sendMessage(m.chat, { react: { text: '⚙️', key: m.key } })
