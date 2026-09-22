@@ -5281,16 +5281,43 @@ case 'togroupstatus':
 case 'groupstatus':
 case 'gcstatus': {
     if (!isCreator) return reply(mess.owner)
-    let groupId = m.isGroup ? m.chat : ''
-    let msgText = text || ''
-    if (!m.isGroup) {
-        const args = (text || '').trim().split(/\s+/)
+    const colors = {
+        red: '#FF0000',
+        green: '#25D366',
+        blue: '#3498DB',
+        purple: '#6C5CE7',
+        yellow: '#F1C40F',
+        orange: '#E67E22',
+        pink: '#FF69B4',
+        cyan: '#00BCD4',
+        black: '#000000',
+        white: '#FFFFFF'
+    }
+    const args = (text || '').trim().split(/\s+/).filter(Boolean)
+    let groupId = ''
+    let backgroundColor = '#25D366'
+    let font = 1
+    let msgText = ''
+    if (args[0]?.endsWith('@g.us')) {
         groupId = args.shift()
-        msgText = args.join(' ').trim()
-        if (!groupId || !groupId.endsWith('@g.us')) {
-            return reply(`Provide a valid group JID.\n\nExample:\n${prefix + command} 1203630xxxx@g.us Hello group`)
+    } else if (m.isGroup) {
+        groupId = m.chat
+    } else {
+        return reply(`Provide a valid group JID.\n\nExample:\n${prefix + command} 1203630xxxx@g.us red 3 Hello group`)
+    }
+    if (args[0]) {
+        const colorArg = args[0].toLowerCase()
+        if (/^#[0-9a-f]{6}$/i.test(args[0])) {
+            backgroundColor = args.shift()
+        } else if (colors[colorArg]) {
+            backgroundColor = colors[colorArg]
+            args.shift()
         }
     }
+    if (args[0] && /^[1-5]$/.test(args[0])) {
+        font = Number(args.shift())
+    }
+    msgText = args.join(' ').trim()
     if (!groupId || !groupId.endsWith('@g.us')) {
         return reply('Group JID not found or invalid.')
     }
@@ -5308,19 +5335,19 @@ case 'gcstatus': {
                 await EliteProTech.sendMessage(m.chat, {
                     react: { text: '❌', key: m.key }
                 })
-                return reply('Provide text or reply to media.')
+                return reply(`Provide text or reply to media.\n\nExample:\n${prefix + command} ${groupId} red 3 Hello group`)
             }
             await EliteProTech.sendMessage(groupId, {
                 groupStatusMessage: {
                     text: msgText,
-                    backgroundColor: '#25D366',
-                    font: 1
+                    backgroundColor,
+                    font
                 }
             })
             await EliteProTech.sendMessage(m.chat, {
                 react: { text: '✅', key: m.key }
             })
-            return reply(`Group status text sent to ${targetGroupName}`)
+            return reply(`Group status text sent to ${targetGroupName}\n\n🎨 Color: ${backgroundColor}\n🔤 Font: ${font}`)
         }
         const quoted = m.quoted
         const mime = quoted.mimetype || quoted.msg?.mimetype || ''
@@ -5333,14 +5360,14 @@ case 'gcstatus': {
             await EliteProTech.sendMessage(groupId, {
                 groupStatusMessage: {
                     text: textMessage,
-                    backgroundColor: '#25D366',
-                    font: 1
+                    backgroundColor,
+                    font
                 }
             })
             await EliteProTech.sendMessage(m.chat, {
                 react: { text: '✅', key: m.key }
             })
-            return reply(`Group status text sent to ${targetGroupName}`)
+            return reply(`Group status text sent to ${targetGroupName}\n\n🎨 Color: ${backgroundColor}\n🔤 Font: ${font}`)
         }
         if (/image/.test(mime)) {
             const buffer = await quoted.download()
