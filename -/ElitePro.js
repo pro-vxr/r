@@ -6024,39 +6024,33 @@ break
 case 'settings': {
 if (!isCreator) return reply(mess.owner)
 let txt = `⚙️ *ELITEPRO BOT SETTINGS*\n`
-txt += `╭───────────────━⊷\n`
-txt += `┃ 📊 Auto Status View : ${autoviewstatus ? "✅ ON" : "❌ OFF"}\n`
-txt += `┃ 💚' Auto Status Like : ${autolikestatus ? `✅ ON (${global.autolikestatusEmoji || '💚'})` : "❌ OFF"}\n`
-txt += `┃ 👀💚' Auto View Like : ${autoviewstatus && autolikestatus ? "✅ ON" : "❌ OFF"}\n`
-txt += `┃ 📖 Auto Read        : ${autoread ? "✅ ON" : "❌ OFF"}\n`
-txt += `┃ ⌨️ Auto Typing      : ${autoTyping ? "✅ ON" : "❌ OFF"}\n`
-txt += `┃ 🎙️ Auto Recording   : ${autoRecording ? "✅ ON" : "❌ OFF"}\n`
-txt += `┃ 🎧 Auto RecordType  : ${autorecordtype ? "✅ ON" : "❌ OFF"}\n`
-txt += `┃ 📝 Auto Bio         : ${autobio ? "✅ ON" : "❌ OFF"}\n`
-txt += `┃ ✨ Auto React       : ${autoreact ? "✅ ON" : "❌ OFF"}\n`
-txt += `┃ 🤖 Bot Mode         : ${EliteProTech.public ? "PUBLIC" : "PRIVATE"}\n`
-txt += `┃ 🔤 Prefix           : ${prefix || "None"}\n`
-txt += `╰───────────────━⊷\n\n`
-
+txt += `📊 Auto Status View : ${autoviewstatus ? "✅ ON" : "❌ OFF"}\n`
+txt += `💚 Auto Status Like : ${autolikestatus ? `✅ ON (${global.autolikestatusEmoji || '💚'})` : "❌ OFF"}\n`
+txt += `👀💚 Auto View Like : ${autoviewstatus && autolikestatus ? "✅ ON" : "❌ OFF"}\n`
+txt += `📖 Auto Read        : ${autoread ? "✅ ON" : "❌ OFF"}\n`
+txt += `⌨️ Auto Typing      : ${autoTyping ? "✅ ON" : "❌ OFF"}\n`
+txt += `🎙️ Auto Recording   : ${autoRecording ? "✅ ON" : "❌ OFF"}\n`
+txt += `🎧 Auto RecordType  : ${autorecordtype ? "✅ ON" : "❌ OFF"}\n`
+txt += `📝 Auto Bio         : ${autobio ? "✅ ON" : "❌ OFF"}\n`
+txt += `✨ Auto React       : ${autoreact ? "✅ ON" : "❌ OFF"}\n`
+txt += `🤖 Bot Mode         : ${EliteProTech.public ? "PUBLIC" : "PRIVATE"}\n`
+txt += `🔤 Prefix           : ${prefix || "None"}\n\n`
 txt += `📌 *Available Commands*\n`
-txt += `╭───────────────━⊷\n`
-txt += `┃ ${prefix}autoviewstatus on/off\n`
-txt += `┃ ${prefix}autolikestatus on [emoji]\n`
-txt += `┃ ${prefix}autolikestatus default\n`
-txt += `┃ ${prefix}setlikestatus [emoji]\n`
-txt += `┃ ${prefix}autoviewlike on/off [emoji]\n`
-txt += `┃ ${prefix}autoread on/off\n`
-txt += `┃ ${prefix}autotyping on/off\n`
-txt += `┃ ${prefix}autorecording on/off\n`
-txt += `┃ ${prefix}autorecordtype on/off\n`
-txt += `┃ ${prefix}autobio on/off\n`
-txt += `┃ ${prefix}autoreact on/off\n`
-txt += `┃ ${prefix}mode public/private\n`
-txt += `┃ ${prefix}setprefix <prefix/none>\n`
-txt += `┃ ${prefix}groupsettings\n`
-txt += `╰───────────────━⊷\n`
-
-txt += `> *ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴇʟɪᴛᴇ-ᴘʀᴏ-ᴛᴇᴄʜ©*`
+txt += `${prefix}autoviewstatus on/off\n`
+txt += `${prefix}autolikestatus on [emoji]\n`
+txt += `${prefix}autolikestatus default\n`
+txt += `${prefix}setlikestatus [emoji]\n`
+txt += `${prefix}autoviewlike on/off [emoji]\n`
+txt += `${prefix}autoread on/off\n`
+txt += `${prefix}autotyping on/off\n`
+txt += `${prefix}autorecording on/off\n`
+txt += `${prefix}autorecordtype on/off\n`
+txt += `${prefix}autobio on/off\n`
+txt += `${prefix}autoreact on/off\n`
+txt += `${prefix}mode public/private\n`
+txt += `${prefix}setprefix <prefix/none>\n`
+txt += `${prefix}groupsettings\n`
+txt += `> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴇʟɪᴛᴇ-ᴘʀᴏ-ᴛᴇᴄʜ`
 
 await EliteProTech.sendMessage(m.chat, {
     image: elitepropic,
