@@ -1046,53 +1046,41 @@ EliteProTech.ev.on('messages.upsert', async chatUpdate => {
     try {
         const { messages, type } = chatUpdate
         if (type !== 'notify') return
-
-        const mek = messages[0]
-        if (!mek?.message || !mek?.key?.id) return
-
-        const msgId = mek.key.id
-        if (handledMessages.has(msgId)) return
-        handledMessages.add(msgId)
-        setTimeout(() => handledMessages.delete(msgId), 60000)
-
-        const rawTs = mek.messageTimestamp
-        const msgTimestamp = (typeof rawTs === 'object' ? (rawTs?.toNumber?.() ?? rawTs?.low ?? 0) : (rawTs ?? 0)) * 1000
-        if (msgTimestamp && msgTimestamp < BOT_START_TIME) return
-
-        mek.message =
-            mek.message?.ephemeralMessage?.message ||
-            mek.message?.viewOnceMessageV2?.message ||
-            mek.message?.viewOnceMessage?.message ||
-            mek.message
-
-        if (mek.message?.protocolMessage || mek.message?.pollUpdateMessage) return
-
-        const jid = mek.key?.remoteJid
-        const isStatus = jid === 'status@broadcast'
-        const isGroup = jid?.endsWith('@g.us')
-        const isNewsletter = jid?.endsWith('@newsletter')
-
-        if (isStatus) {
-            handleStatusWatcher(EliteProTech, mek)
-            return
+        for (const mek of messages) {
+            if (!mek?.message || !mek?.key?.id) continue
+            const msgId = mek.key.id
+            if (handledMessages.has(msgId)) continue
+            handledMessages.add(msgId)
+            setTimeout(() => handledMessages.delete(msgId), 60000)
+            const rawTs = mek.messageTimestamp
+            const msgTimestamp = (typeof rawTs === 'object' ? (rawTs?.toNumber?.() ?? rawTs?.low ?? 0) : (rawTs ?? 0)) * 1000
+            if (msgTimestamp && msgTimestamp < BOT_START_TIME) continue
+            mek.message =
+                mek.message?.ephemeralMessage?.message ||
+                mek.message?.viewOnceMessageV2?.message ||
+                mek.message?.viewOnceMessage?.message ||
+                mek.message
+            if (mek.message?.protocolMessage || mek.message?.pollUpdateMessage) continue
+            const jid = mek.key?.remoteJid
+            const isStatus = jid === 'status@broadcast'
+            const isGroup = jid?.endsWith('@g.us')
+            const isNewsletter = jid?.endsWith('@newsletter')
+            if (isStatus) {
+                handleStatusWatcher(EliteProTech, mek)
+                continue
+            }
+            if (mek.key.id.startsWith('BAE5') && mek.key.id.length === 16) continue
+            const m = smsg(EliteProTech, mek, store)
+            EliteProHandler(EliteProTech, m, chatUpdate, store)
+            if (isGroup) {
+                handleAntiStatus(EliteProTech, mek)
+                handleAntiLink(EliteProTech, mek)
+            }
+            if (isNewsletter) handleChannelReact(EliteProTech, mek)
+            handleAntiDeleteCapture(EliteProTech, mek)
+            handleAutoReact(EliteProTech, mek)
+            handleChatbot(EliteProTech, mek)
         }
-
-        if (mek.key.id.startsWith('BAE5') && mek.key.id.length === 16) return
-
-        const m = smsg(EliteProTech, mek, store)
-        EliteProHandler(EliteProTech, m, chatUpdate, store)
-
-        if (isGroup) {
-            handleAntiStatus(EliteProTech, mek)
-            handleAntiLink(EliteProTech, mek)
-        }
-
-        if (isNewsletter) handleChannelReact(EliteProTech, mek)
-
-        handleAntiDeleteCapture(EliteProTech, mek)
-        handleAutoReact(EliteProTech, mek)
-        handleChatbot(EliteProTech, mek)
-
     } catch (err) {
         console.log(err)
     }
