@@ -121,7 +121,7 @@ module.exports = async (EliteProTech, m, chatUpdate, store) => {
         const isGroupOwner = m.isGroup ? (groupOwner ? groupOwner : groupAdmins).includes(m.sender) : false
         const cleanLid = EliteProTech.user?.lid ? EliteProTech.user.lid.replace(/:\d+/, '') : '';
         const cleanId = EliteProTech.user?.id ? EliteProTech.user.id.replace(/:\d+/, '') : '';
-        const ownerIds = [ownernumber, ..._owner, cleanLid, cleanId].map(normalizeOwnerId).filter(Boolean)
+        const ownerIds = [..._owner, cleanLid, cleanId].map(normalizeOwnerId).filter(Boolean)
         const isCreator = ownerIds.includes(normalizeOwnerId(m.sender))
         
 const reply = (teks) => {
@@ -5498,35 +5498,20 @@ case 'listowner':
 case 'listsudo': {
     try {
         if (!isCreator) {
-            return reply(mess.owner);
+            return reply(mess.owner)
         }
-        
-        const owners = owner;
-        const currentOwner = ownernumber; // from your base
-        
-        const mainOwner = owners[0] || 'Not defined';
-        const otherOwners = owners.slice(1);
-        
+        const userId = EliteProTech.user?.id?.split(':')[0] || 'Not defined'
+        const owners = owner
         let msg =
-            `*List of owners:*
-
-*Default:*
-- ${mainOwner}
-
-*Current Owner:*
-- ${currentOwner}`;
-        
-        if (otherOwners.length) {
-            msg += `
-
-*Others:*
-${otherOwners.map(o => `- ${o}`).join('\n')}`;
+            `*List of owners:*\n\n` +
+            `*Default:*\n- ${userId}`
+        if (owners.length) {
+            msg += `\n\n*Current:*\n${owners.map(o => `- ${o}`).join('\n')}`
         }
-        
-        reply(msg);
+        reply(msg)
     } catch (err) {
-        console.error(err);
-        reply('❌ Failed to fetch owner numbers.');
+        console.error(err)
+        reply('❌ Failed to fetch owner numbers.')
     }
 }
 break
