@@ -5278,6 +5278,263 @@ ${app.description}
   }
   break
 }
+case 'stickerpack':
+case 'sp': {
+    if (!global.stickerPackQueue) {
+        global.stickerPackQueue = new Map()
+    }
+    const args = (text || '').trim().split(/\s+/).filter(Boolean)
+    const action = (args.shift() || '').toLowerCase()
+    if (!action) {
+        return reply(
+            `Sticker Pack\n\n` +
+            `${prefix + command} add\n` +
+            `Reply to an image to add it\n\n` +
+            `${prefix + command} create Pack Name|Description\n` +
+            `Create the sticker pack\n\n` +
+            `${prefix + command} count\n` +
+            `Show collected stickers\n\n` +
+            `${prefix + command} clear\n` +
+            `Clear collected stickers`
+        )
+    }
+    if (action === 'add') {
+        if (!m.quoted) {
+            return reply('❌ Reply to an image to add it.')
+        }
+        const mime = m.quoted.mimetype || m.quoted.msg?.mimetype || ''
+        if (!mime.startsWith('image/')) {
+            return reply('❌ You can only add images.')
+        }
+        try {
+            const image = await m.quoted.download()
+            if (!image || !Buffer.isBuffer(image)) {
+                return reply('❌ Failed to download the image.')
+            }
+            const images = global.stickerPackQueue.get(m.chat) || []
+            if (images.length >= 60) {
+                return reply('❌ Maximum of 60 stickers per pack.')
+            }
+            images.push(image)
+            global.stickerPackQueue.set(m.chat, images)
+            return reply(
+                `✅ Image added\n\n🖼️ Stickers collected: ${images.length}`
+            )
+        } catch (err) {
+            return reply(
+                `❌ Failed to add image.\n${err.message || err}`
+            )
+        }
+    }
+    if (action === 'count') {
+        const images = global.stickerPackQueue.get(m.chat) || []
+        return reply(
+            images.length
+                ? `📦 Sticker pack queue\n\n🖼️ Stickers: ${images.length}`
+                : '📦 Sticker pack queue is empty.'
+        )
+    }
+    if (action === 'clear') {
+        global.stickerPackQueue.delete(m.chat)
+        return reply('✅ Sticker pack queue cleared.')
+    }
+    if (action === 'create') {
+        const images = global.stickerPackQueue.get(m.chat) || []
+        if (!images.length) {
+            return reply(
+                '❌ No stickers collected.\n\nReply to images with `.stickerpack add` first.'
+            )
+        }
+        const packInfo = args.join(' ').trim()
+        if (!packInfo.includes('|')) {
+            return reply(
+                `❌ Invalid format.\n\n` +
+                `Use:\n` +
+                `${prefix + command} create Pack Name|Description`
+            )
+        }
+        const [name, description] = packInfo
+            .split('|')
+            .map(v => v.trim())
+        if (!name || !description) {
+            return reply(
+                `❌ Pack name and description are required.\n\n` +
+                `Example:\n` +
+                `${prefix + command} create EliteProTech|My Sticker Pack`
+            )
+        }
+        await EliteProTech.sendMessage(m.chat, {
+            react: {
+                text: '⏳',
+                key: m.key
+            }
+        })
+        try {
+            await EliteProTech.sendStickerPack(
+                m.chat,
+                images,
+                {
+                    name,
+                    publisher: 'EliteProTech',
+                    description
+                },
+                {
+                    quoted: m
+                }
+            )
+            global.stickerPackQueue.delete(m.chat)
+            await EliteProTech.sendMessage(m.chat, {
+                react: {
+                    text: '✅',
+                    key: m.key
+                }
+            })
+            return
+        } catch (err) {
+            console.log('StickerPack error:', err)
+            await EliteProTech.sendMessage(m.chat, {
+                react: {
+                    text: '❌',
+                    key: m.key
+                }
+            })
+            return reply(
+                `❌ Failed to create sticker pack.\n\n${err.message || err}`
+            )
+        }
+    }
+    return reply(
+        '❌ Unknown action.\n\nUse `add`, `create`, `count`, or `clear`.'
+    )
+}
+break
+case 'zipsearch': {
+    if (!m.quoted) return reply('Reply to the ZIP file.')
+    const fs = require('fs')
+    const path = require('path')
+    const os = require('os')
+    const { execFile } = require('child_process')
+    const { promisify } = require('util')
+    const execFileAsync = promisify(execFile)
+    const query = (text || '').trim()
+    if (!query) {
+        return reply(
+            `Usage:\n${prefix + command} <search term>\n\n` +
+            `Example:\n${prefix + command} groupstatus`
+        )
+    }
+    const buffer = await EliteProTech.downloadMediaMessage(
+        m.quoted,
+        'buffer',
+        {},
+        {}
+    )
+    const zipPath = path.join(
+        os.tmpdir(),
+        `zipsearch-${Date.now()}.zip`
+    )
+    fs.writeFileSync(zipPath, buffer)
+    try {
+        const { stdout } = await execFileAsync(
+            'unzip',
+            ['-Z1', zipPath],
+            {
+                maxBuffer: 50 * 1024 * 1024
+            }
+        )
+        const files = stdout
+            .split('\n')
+            .map(x => x.trim())
+            .filter(Boolean)
+            .filter(file =>
+                /\.(js|mjs|cjs|json|txt|ts|tsx|jsx|html|css|xml|yaml|yml)$/i.test(file)
+            )
+        const results = []
+        const search = query.toLowerCase()
+        for (const file of files) {
+            try {
+                const { stdout: content } = await execFileAsync(
+                    'unzip',
+                    ['-p', zipPath, file],
+                    {
+                        maxBuffer: 20 * 1024 * 1024
+                    }
+                )
+                const lines = content.split(/\r?\n/)
+                for (let i = 0; i < lines.length; i++) {
+                    if (lines[i].toLowerCase().includes(search)) {
+                        results.push(
+                            `📄 ${file}:${i + 1}\n` +
+                            `${lines[i].trim()}`
+                        )
+                    }
+                }
+            } catch {}
+        }
+        if (!results.length) {
+            return reply(
+                `❌ No matches found for:\n\`${query}\``
+            )
+        }
+        const output = results.join('\n\n')
+        await m.reply(
+            `🔎 ZIP SEARCH\n\n` +
+            `Query: \`${query}\`\n` +
+            `Matches: ${results.length}\n\n` +
+            output.slice(0, 60000)
+        )
+    } catch (error) {
+        await m.reply(
+            `❌ ZIP search failed:\n\n${error.message || error}`
+        )
+    } finally {
+        try {
+            fs.unlinkSync(zipPath)
+        } catch {}
+    }
+}
+break
+case 'rename':
+case 'ren': {
+    if (!m.quoted) {
+        return reply('❌ Reply to a document/file.')
+    }
+    const newName = (text || '').trim()
+    if (!newName) {
+        return reply(
+            `❌ Provide a new filename.\n\n` +
+            `Example:\n${prefix + command} EliteProTech.pdf`
+        )
+    }
+    if (newName.includes('/') || newName.includes('\\')) {
+        return reply('❌ Invalid filename.')
+    }
+    try {
+        const mime = m.quoted.mimetype || m.quoted.msg?.mimetype || ''
+        if (!mime) {
+            return reply('❌ The quoted message is not a supported file.')
+        }
+        const buffer = await m.quoted.download()
+        if (!buffer) {
+            return reply('❌ Failed to download the file.')
+        }
+        await EliteProTech.sendMessage(
+            m.chat,
+            {
+                document: buffer,
+                mimetype: mime,
+                fileName: newName
+            },
+            {
+                quoted: m
+            }
+        )
+    } catch (err) {
+        console.log('Rename error:', err)
+        return reply(`❌ Failed to rename file.\n\n${err.message || err}`)
+    }
+}
+break
 case 'togroupstatus':
 case 'groupstatus':
 case 'gcstatus': {
@@ -5294,29 +5551,64 @@ case 'gcstatus': {
         black: '#000000',
         white: '#FFFFFF'
     }
+    const colorValues = Object.values(colors)
     const args = (text || '').trim().split(/\s+/).filter(Boolean)
     let groupId = ''
-    let backgroundColor = '#25D366'
-    let font = 1
+    let backgroundColor = colorValues[Math.floor(Math.random() * colorValues.length)]
+    let textColor = '#FFFFFF'
+    let font = Math.floor(Math.random() * 5) + 1
     let msgText = ''
     if (args[0]?.endsWith('@g.us')) {
         groupId = args.shift()
     } else if (m.isGroup) {
         groupId = m.chat
     } else {
-        return reply(`Provide a valid group JID.\n\nExample:\n${prefix + command} 1203630xxxx@g.us red 3 Hello group`)
+        return reply(
+            `Usage:\n` +
+            `.gcstatus [JID] message\n\n` +
+            `Custom format:\n` +
+            `.gcstatus [JID] -background-textcolor-font message\n\n` +
+            `Examples:\n` +
+            `.gcstatus 1203630xxxx@g.us Hello group\n` +
+            `.gcstatus 1203630xxxx@g.us -red-white-3 Hello group\n` +
+            `.gcstatus 1203630xxxx@g.us -white-black-2 Hello group\n` +
+            `.gcstatus 1203630xxxx@g.us -#FF0000-#FFFFFF-3 Hello group`
+        )
     }
-    if (args[0]) {
-        const colorArg = args[0].toLowerCase()
-        if (/^#[0-9a-f]{6}$/i.test(args[0])) {
-            backgroundColor = args.shift()
-        } else if (colors[colorArg]) {
-            backgroundColor = colors[colorArg]
-            args.shift()
+    if (args[0]?.startsWith('-')) {
+        const format = args.shift()
+        const parts = format.slice(1).split('-')
+        if (parts.length !== 3) {
+            return reply(
+                `Invalid custom format.\n\n` +
+                `Use:\n` +
+                `.gcstatus -background-textcolor-font message\n\n` +
+                `Example:\n` +
+                `.gcstatus -red-white-3 Hello group`
+            )
         }
+        const [bgArg, textArg, fontArg] = parts
+        if (/^#[0-9a-f]{6}$/i.test(bgArg)) {
+            backgroundColor = bgArg
+        } else if (colors[bgArg.toLowerCase()]) {
+            backgroundColor = colors[bgArg.toLowerCase()]
+        } else {
+            return reply(`Invalid background color: ${bgArg}`)
+        }
+        if (/^#[0-9a-f]{6}$/i.test(textArg)) {
+            textColor = textArg
+        } else if (colors[textArg.toLowerCase()]) {
+            textColor = colors[textArg.toLowerCase()]
+        } else {
+            return reply(`Invalid text color: ${textArg}`)
+        }
+        if (!/^[1-5]$/.test(fontArg)) {
+            return reply('Invalid font. Choose a font from 1 to 5.')
+        }
+        font = Number(fontArg)
     }
-    if (args[0] && /^[1-5]$/.test(args[0])) {
-        font = Number(args.shift())
+    if (backgroundColor.toUpperCase() === '#FFFFFF') {
+        textColor = '#000000'
     }
     msgText = args.join(' ').trim()
     if (!groupId || !groupId.endsWith('@g.us')) {
@@ -5328,33 +5620,61 @@ case 'gcstatus': {
         targetGroupName = meta?.subject || groupId
     } catch {}
     await EliteProTech.sendMessage(m.chat, {
-        react: { text: '⏳', key: m.key }
+        react: {
+            text: '⏳',
+            key: m.key
+        }
     })
     try {
         if (!m.quoted) {
             if (!msgText) {
                 await EliteProTech.sendMessage(m.chat, {
-                    react: { text: '❌', key: m.key }
+                    react: {
+                        text: '❌',
+                        key: m.key
+                    }
                 })
-                return reply(`Provide text or reply to media.\n\nExample:\n${prefix + command} ${groupId} red 3 Hello group`)
+                return reply(
+                    `Usage:\n` +
+                    `Provide a text, image, video or audio, or reply to one.\n\n` +
+                    `Custom format:\n` +
+                    `.gcstatus -background-textcolor-font message\n\n` +
+                    `Examples:\n` +
+                    `.gcstatus Hello group\n` +
+                    `.gcstatus -red-white-3 Hello group\n` +
+                    `.gcstatus -white-black-2 Hello group\n` +
+                    `.gcstatus -#FF0000-#FFFFFF-3 Hello group`
+                )
             }
             await EliteProTech.sendMessage(groupId, {
                 groupStatusMessage: {
                     text: msgText,
                     backgroundColor,
+                    textColor,
                     font
                 }
             })
             await EliteProTech.sendMessage(m.chat, {
-                react: { text: '✅', key: m.key }
+                react: {
+                    text: '✅',
+                    key: m.key
+                }
             })
-            return reply(`Group status text sent to ${targetGroupName}\n\n🎨 Color: ${backgroundColor}\n🔤 Font: ${font}`)
+            await EliteProTech.sendMessage(m.chat, {
+                text: `Group status text sent to ${targetGroupName}`
+            })
+            return
         }
         const quoted = m.quoted
         const mime = quoted.mimetype || quoted.msg?.mimetype || ''
         const caption = msgText || quoted.caption || ''
         if (!mime) {
-            const textMessage = quoted.text || quoted.body || quoted.message?.conversation || quoted.msg?.text || caption
+            const textMessage =
+                quoted.text ||
+                quoted.body ||
+                quoted.message?.conversation ||
+                quoted.msg?.text ||
+                caption
             if (!textMessage) {
                 return reply('Quoted message contains no text.')
             }
@@ -5362,13 +5682,20 @@ case 'gcstatus': {
                 groupStatusMessage: {
                     text: textMessage,
                     backgroundColor,
+                    textColor,
                     font
                 }
             })
             await EliteProTech.sendMessage(m.chat, {
-                react: { text: '✅', key: m.key }
+                react: {
+                    text: '✅',
+                    key: m.key
+                }
             })
-            return reply(`Group status text sent to ${targetGroupName}\n\n🎨 Color: ${backgroundColor}\n🔤 Font: ${font}`)
+            await EliteProTech.sendMessage(m.chat, {
+                text: `Group status text sent to ${targetGroupName}`
+            })
+            return
         }
         if (/image/.test(mime)) {
             const buffer = await quoted.download()
@@ -5379,9 +5706,15 @@ case 'gcstatus': {
                 }
             })
             await EliteProTech.sendMessage(m.chat, {
-                react: { text: '✅', key: m.key }
+                react: {
+                    text: '✅',
+                    key: m.key
+                }
             })
-            return reply(`Group status image sent to ${targetGroupName}`)
+            await EliteProTech.sendMessage(m.chat, {
+                text: `Group status image sent to ${targetGroupName}`
+            })
+            return
         }
         if (/video/.test(mime)) {
             const buffer = await quoted.download()
@@ -5393,9 +5726,15 @@ case 'gcstatus': {
                 }
             })
             await EliteProTech.sendMessage(m.chat, {
-                react: { text: '✅', key: m.key }
+                react: {
+                    text: '✅',
+                    key: m.key
+                }
             })
-            return reply(`Group status video sent to ${targetGroupName}`)
+            await EliteProTech.sendMessage(m.chat, {
+                text: `Group status video sent to ${targetGroupName}`
+            })
+            return
         }
         if (/audio/.test(mime)) {
             const buffer = await quoted.download()
@@ -5407,20 +5746,36 @@ case 'gcstatus': {
                 }
             })
             await EliteProTech.sendMessage(m.chat, {
-                react: { text: '✅', key: m.key }
+                react: {
+                    text: '✅',
+                    key: m.key
+                }
             })
-            return reply(`Group status audio sent to ${targetGroupName}`)
+            await EliteProTech.sendMessage(m.chat, {
+                text: `Group status audio sent to ${targetGroupName}`
+            })
+            return
         }
         await EliteProTech.sendMessage(m.chat, {
-            react: { text: '❌', key: m.key }
+            react: {
+                text: '❌',
+                key: m.key
+            }
         })
-        return reply('Unsupported message type. Use text, image, video, or audio.')
+        return reply(
+            'Unsupported message type. Use text, image, video, or audio.'
+        )
     } catch (err) {
-        console.log('GroupStatus error:', err.message)
+        console.log('GroupStatus error:', err)
         await EliteProTech.sendMessage(m.chat, {
-            react: { text: '❌', key: m.key }
+            react: {
+                text: '❌',
+                key: m.key
+            }
         })
-        return reply(`Failed to send group status.\n${err.message || err}`)
+        return reply(
+            `Failed to send group status.\n${err.message || err}`
+        )
     }
 }
 break
@@ -9397,6 +9752,9 @@ ${readmore}┏━━━━━━━━━━━━━━━❍
 │𖥟╾ Toaudio
 │𖥟╾ Tovideonote
 │𖥟╾ Tomp3
+│𖥟╾ Stickerpack
+│𖥟╾ Reanme
+│𖥟╾ Zipsearch
 │𖥟╾ Tovn
 │𖥟╾ Togif
 │𖥟╾ Toqr
