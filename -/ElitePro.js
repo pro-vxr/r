@@ -3542,7 +3542,8 @@ case 'lid': {
     }
 }
 break
-case 'eval': {
+case 'eval':
+case 'ev': {
     if (!isCreator) return
 
     let code = full_args
@@ -9226,7 +9227,7 @@ break
 case 'addowner': case 'addsudo': {
 if (!isCreator) return reply(mess.owner)
 const rawOwner = q.split("|")[0].trim().toLowerCase()
-if (!rawOwner) return reply(`Use ${prefix + command} number or LID\nExamples:\n${prefix + command} ${ownernumber}\n${prefix + command} 123456789@lid`)
+if (!rawOwner) return reply(`Use ${prefix + command} number or LID\nExamples:\n${prefix + command} 2347047504860\n${prefix + command} 123456789@lid`)
 let ownerId
 if (rawOwner.endsWith('@lid')) {
     ownerId = normalizeOwnerId(rawOwner)
