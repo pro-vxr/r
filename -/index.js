@@ -1143,7 +1143,7 @@ EliteProTech.serializeM = (m) => smsg(EliteProTech, m, store)
 EliteProTech.ev.on("connection.update", async (s) => {
         const { connection, lastDisconnect } = s
         if (connection == "open") {
-            restoreBotData(EliteProTech.user?.id)
+            await restoreBotData(EliteProTech.user?.id)
             modeData.mode = global.botMode
             EliteProTech.public = global.botMode === 'public'
             console.log(chalk.yellow(`]`));
