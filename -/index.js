@@ -1129,48 +1129,43 @@ EliteProTech.public = modeData.mode === 'public'
 EliteProTech.serializeM = (m) => smsg(EliteProTech, m, store)
 
 EliteProTech.ev.on("connection.update", async (s) => {
-        const { connection, lastDisconnect } = s
-        if (connection == "open") {
-            await restoreBotData(EliteProTech.user?.id)
-            modeData.mode = global.botMode
-            EliteProTech.public = global.botMode === 'public'
-            console.log(chalk.yellow(`]`));
-            console.log(chalk.yellow(`✅  ${botname} is now Connected`));
-            console.log(chalk.cyan(`Logged in as: ${EliteProTech.user?.name || 'Unknown'} (${EliteProTech.user?.id?.split(':')[0]})`));
-            console.log(chalk.yellow(`]`));
-
-        }
-if (
-    connection === "close" &&
-    lastDisconnect &&
-    lastDisconnect.error
-) {
-    if (reconnecting) return
-    reconnecting = true
-    if (awaitingNumber && rl && !rl.closed) rl.close()
-    const statusCode = lastDisconnect.error.output?.statusCode;
-
-    if (statusCode === 401) {
-        console.log(chalk.red("❌ Your device was logged out. Please Re-pair."));
-    } else {
-        if (pairingCodeRequested && !EliteProTech.authState.creds.registered) {
-            console.log(chalk.yellow('Pairing code expired. Please enter your number again.'))
-        }
-        await new Promise(resolve => setTimeout(resolve, 1000))
-        return startEliteProTech();
+    const { connection, lastDisconnect } = s
+    if (connection == "open") {
+        reconnecting = false
+        modeData.mode = global.botMode
+        EliteProTech.public = global.botMode === 'public'
+        console.log(chalk.yellow(`]`))
+        console.log(chalk.yellow(`✅  ${botname} is now Connected`))
+        console.log(chalk.cyan(`Logged in as: ${EliteProTech.user?.name || 'Unknown'} (${EliteProTech.user?.id?.split(':')[0]})`))
+        console.log(chalk.yellow(`]`))
+        restoreBotData(EliteProTech.user?.id).catch(() => {})
     }
-}      
-   })
-   EliteProTech.ev.on('creds.update', saveCreds)
+    if (connection === "close" && lastDisconnect && lastDisconnect.error) {
+        if (reconnecting) return
+        reconnecting = true
+        if (awaitingNumber && rl && !rl.closed) rl.close()
+        const statusCode = lastDisconnect.error.output?.statusCode
+        if (statusCode === 401) {
+            console.log(chalk.red("❌ Your device was logged out. Please Re-pair."))
+        } else {
+            if (pairingCodeRequested && !EliteProTech.authState.creds.registered) {
+                console.log(chalk.yellow('Pairing code expired. Please enter your number again.'))
+            }
+            await new Promise(resolve => setTimeout(resolve, 1000))
+            return startEliteProTech()
+        }
+    }
+})
+EliteProTech.ev.on('creds.update', saveCreds)
 
-    EliteProTech.sendText = (jid, text, quoted = '', options) => EliteProTech.sendMessage(jid, {
+EliteProTech.sendText = (jid, text, quoted = '', options) => EliteProTech.sendMessage(jid, {
         text: text,
         ...options
     }, {
         quoted,
         ...options
     })
-    EliteProTech.sendTextWithMentions = async (jid, text, quoted, options = {}) => EliteProTech.sendMessage(jid, {
+EliteProTech.sendTextWithMentions = async (jid, text, quoted, options = {}) => EliteProTech.sendMessage(jid, {
         text: text,
         mentions: [...text.matchAll(/@(\d{0,16})/g)].map(v => v[1] + '@s.whatsapp.net'),
         ...options
