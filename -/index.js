@@ -213,28 +213,27 @@ const store = {
     },
     bind: function(ev) {
         ev.on('messages.upsert', ({ messages }) => {
-            messages.forEach(msg => {
-                if (msg.key && msg.key.remoteJid) {
-                    this.messages[msg.key.remoteJid] = this.messages[msg.key.remoteJid] || {}
-                    this.messages[msg.key.remoteJid][msg.key.id] = msg
-                }
-            })
+            for (const msg of messages || []) {
+                const jid = msg?.key?.remoteJid
+                const id = msg?.key?.id
+                if (!jid || !id) continue
+                if (!this.messages[jid]) this.messages[jid] = {}
+                this.messages[jid][id] = msg
+            }
         })
-        
         ev.on('contacts.update', (contacts) => {
-            contacts.forEach(contact => {
+            for (const contact of contacts || []) {
                 if (contact.id) {
                     this.contacts[contact.id] = contact
                 }
-            })
+            }
         })
-        
         ev.on('chats.set', (chats) => {
             this.chats = chats
         })
     },
-    loadMessage: async function (jid, id) {
-    return this.messages[jid]?.[id] || null
+    loadMessage: async function(jid, id) {
+        return this.messages[jid]?.[id] || null
     }
 }
 let owner = readJson(OWNER_FILE, [])
@@ -295,10 +294,10 @@ const {  state, saveCreds } =await useMultiFileAuthState(`./session`)
       generateHighQualityLinkPreview: true, 
       syncFullHistory: false,
 	  shouldSyncHistoryMessage: () => false,
-      getMessage: async (key) => {
+      getMessage: async (key) => { try {
       const msg = await store.loadMessage(key.remoteJid, key.id)
-      return msg?.message || undefined
-     },
+      return msg?.message || undefined } catch { return undefined }
+	  },
       msgRetryCounterCache,
       cachedGroupMetadata: async (jid) => groupMetadataCache.get(jid),
       defaultQueryTimeoutMs: undefined,
