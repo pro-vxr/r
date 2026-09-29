@@ -853,6 +853,14 @@ function loadMessage(remoteJid, msgId) {
         return null
     }
 }
+async function waitForSavedMessage(remoteJid, msgId, attempts = 10, delay = 100) {
+    for (let i = 0; i < attempts; i++) {
+        const old = loadMessage(remoteJid, msgId)
+        if (old?.message) return old
+        await new Promise(resolve => setTimeout(resolve, delay))
+    }
+    return null
+}
 
 async function restoreMessage(EliteProTech, from, note, msg, quoted, mentions) {
     try {
@@ -1009,8 +1017,8 @@ EliteProTech.ev.on('messages.update', async updates => {
 
         handledDeletes.add(`${baseKey}|${Date.now()}`)
 
-        const old = loadMessage(remoteJid, msgId)
-        if (!old?.message) continue
+        const old = await waitForSavedMessage(remoteJid, msgId)
+		if (!old?.message) continue
 
         const deletedBy = update.participant || update.key.participant || remoteJid
         const sentBy = old.key.participant || old.key.remoteJid
@@ -1024,7 +1032,7 @@ EliteProTech.ev.on('messages.update', async updates => {
         const ownerNumber = EliteProTech.user.id.split(':')[0] + '@s.whatsapp.net'
         const from = ownerNumber
 
-        const chatName = await getChatName(EliteProTech, remoteJid, remoteJid)
+        const chatName = remoteJid.endsWith('@g.us') ? 'Group' : remoteJid
 
         const note = `╭━━[ *× ANTI DELETE MESSAGES ×* ]━┉
 ┣━ *Deleted:* ${whoDeleted}
