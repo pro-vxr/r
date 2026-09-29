@@ -34,19 +34,28 @@ let elitepropic = fs.readFileSync('./database/elitepropic.jpg')
 const settingsFile = './database/settings.json'
 
 function saveSettings() {
-    fs.writeFileSync(settingsFile, JSON.stringify({
-        autoviewstatus: global.autoviewstatus,
-        autolikestatus: global.autolikestatus,
-        autolikestatusEmoji: global.autolikestatusEmoji || '💚',
-        autoread: global.autoread,
-        autoTyping: global.autoTyping,
-        autoRecording: global.autoRecording,
-        autorecordtype: global.autorecordtype,
-        autobio: global.autobio,
-        autoreact: global.autoreact,
-        prefix: global.prefix,
-        mode: global.botMode || 'private'
-    }, null, 2))
+    let settings = {}
+    try {
+        settings = JSON.parse(fs.readFileSync(settingsFile, 'utf8'))
+    } catch {}
+
+    settings.autoviewstatus = global.autoviewstatus
+    settings.autolikestatus = global.autolikestatus
+    settings.autolikestatusEmoji = global.autolikestatusEmoji || '💚'
+    settings.autoread = global.autoread
+    settings.autoTyping = global.autoTyping
+    settings.autoRecording = global.autoRecording
+    settings.autorecordtype = global.autorecordtype
+    settings.autobio = global.autobio
+    settings.autoreact = global.autoreact
+    settings.prefix = global.prefix
+    settings.mode = global.botMode || 'private'
+    settings.antiDelete = getAntiDeleteStatus()
+
+    fs.writeFileSync(
+        settingsFile,
+        JSON.stringify(settings, null, 2)
+    )
 }
 
 function normalizeOwnerId(value) {
@@ -3163,35 +3172,25 @@ case 'update': {
     break
 }
 case 'antidelete': {
-    if (!isCreator) return reply(mess.owner);
-    
-    const fs = require('fs');
-    const path = require('path');
-    const togglePath = path.join(__dirname, 'database', 'antidelete.json');
-    
-    // Create the file if it doesn't exist
-    if (!fs.existsSync(togglePath)) {
-        fs.writeFileSync(togglePath, JSON.stringify({ enabled: false }, null, 2));
+    if (!isCreator) return reply(mess.owner)
+    const arg = (args[0] || '').toLowerCase()
+    if (!['on', 'off', 'enable', 'disable'].includes(arg)) {
+        const status = getAntiDeleteStatus()
+        return reply(
+            `⚙️ *ANTI-DELETE SETTINGS*\n\n` +
+            `Status: ${status ? '✅ Enabled' : '❌ Disabled'}\n\n` +
+            `Use:\n` +
+            `${prefix}antidelete on\n` +
+            `${prefix}antidelete off`
+        )
     }
-    
-    const config = JSON.parse(fs.readFileSync(togglePath));
-    
-    const arg = (args[0] || '').toLowerCase();
-    const enableKeywords = ['on', 'enable'];
-    const disableKeywords = ['off', 'disable'];
-    
-    if (enableKeywords.includes(arg)) {
-        config.enabled = true;
-    } else if (disableKeywords.includes(arg)) {
-        config.enabled = false;
-    } else {
-        return reply('⚙️ Use: *.antidelete enable*, or *.antidelete disable*');
-    }
-    
-    fs.writeFileSync(togglePath, JSON.stringify(config, null, 2));
-    reply(`✅ Anti-Delete is now *${config.enabled ? 'enabled' : 'disabled'}*.`);
-    break;
+    const enabled = ['on', 'enable'].includes(arg)
+    setAntiDeleteStatus(enabled)
+    return reply(
+        `✅ Anti-Delete is now *${enabled ? 'enabled' : 'disabled'}*.`
+    )
 }
+break
 case 'facebook':
 case 'fb': {
     if (!text) return reply(`Give Me A Facebook Video Link \n\n*Example:* ${prefix + command} https://www.facebook.com/share/v/15PtWTGvW9/`);
