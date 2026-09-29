@@ -802,22 +802,33 @@ async function handleChannelReact(EliteProTech, mek) {
 //ANTIDELETE CODES//
 const { downloadMediaMessage } = require('baileys')
 const antiDeleteDir = path.join(__dirname, 'anti_delete')
-const toggleFile = path.join(__dirname, 'database', 'antidelete.json')
-
-if (!fs.existsSync(antiDeleteDir)) fs.mkdirSync(antiDeleteDir, { recursive: true })
-if (!fs.existsSync(path.dirname(toggleFile))) fs.mkdirSync(path.dirname(toggleFile), { recursive: true })
-if (!fs.existsSync(toggleFile)) fs.writeFileSync(toggleFile, JSON.stringify({ enabled: false }, null, 2))
-
-let antiDeleteConfig = JSON.parse(fs.readFileSync(toggleFile, 'utf8'))
-
-function reloadConfig() {
+const settingsFile = path.join(__dirname, 'database', 'settings.json')
+if (!fs.existsSync(antiDeleteDir)) {
+    fs.mkdirSync(antiDeleteDir, { recursive: true })
+}
+function getAntiDeleteStatus() {
     try {
-        antiDeleteConfig = JSON.parse(fs.readFileSync(toggleFile, 'utf8'))
+        const settings = JSON.parse(fs.readFileSync(settingsFile, 'utf8'))
+        return settings.antiDelete === true
     } catch {
-        antiDeleteConfig = { enabled: false }
+        return false
     }
 }
-
+function setAntiDeleteStatus(enabled) {
+    let settings = {}
+    try {
+        settings = JSON.parse(fs.readFileSync(settingsFile, 'utf8'))
+    } catch {}
+    settings.antiDelete = enabled
+    fs.writeFileSync(
+        settingsFile,
+        JSON.stringify(settings, null, 2)
+    )
+    return enabled
+}
+global.getAntiDeleteStatus = getAntiDeleteStatus
+global.setAntiDeleteStatus = setAntiDeleteStatus
+	
 function saveMessage(remoteJid, msgId, msg) {
     const filePath = path.join(antiDeleteDir, `${remoteJid}_${msgId}.json`)
     const minimalMsg = {
@@ -972,10 +983,8 @@ setInterval(() => {
 
 async function handleAntiDeleteCapture(EliteProTech, mek) {
     try {
-        reloadConfig()
-        if (!antiDeleteConfig.enabled) return
+        if (!getAntiDeleteStatus()) return
         if (!mek?.message || !mek?.key || mek.key.fromMe) return
-
         saveMessage(mek.key.remoteJid, mek.key.id, mek)
     } catch (err) {
         console.error('❌ Anti-delete capture error:', err.message)
@@ -983,9 +992,7 @@ async function handleAntiDeleteCapture(EliteProTech, mek) {
 }
 
 EliteProTech.ev.on('messages.update', async updates => {
-    reloadConfig()
-    if (!antiDeleteConfig.enabled) return
-
+    if (!getAntiDeleteStatus()) return
     for (const update of updates) {
         const remoteJid = update.key?.remoteJid
         const msgId = update.key?.id
