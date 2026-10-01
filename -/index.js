@@ -204,8 +204,63 @@ http.createServer((req, res) => {
     });
 }).listen(PORT, "0.0.0.0", () => {});
 
+const lidToPnCache = new NodeCache({
+    stdTTL: 24 * 60 * 60,
+    useClones: false,
+    checkperiod: 300
+})
+
+function normalizeJid(jid) {
+    if (!jid) return ''
+    return String(jid).trim().replace(/:\d+(?=@)/, '')
+}
+
+function normalizePnJid(jid) {
+    const value = normalizeJid(jid)
+    if (!value) return ''
+    if (value.endsWith('@s.whatsapp.net')) return value
+    if (/^\d+$/.test(value)) return `${value}@s.whatsapp.net`
+    return ''
+}
+
+function normalizeLidJid(jid) {
+    const value = normalizeJid(jid)
+    return value.endsWith('@lid') ? value : ''
+}
+
+function storeLidMapping(lid, pn) {
+    const lidJid = normalizeLidJid(lid)
+    const pnJid = normalizePnJid(pn)
+    if (lidJid && pnJid) lidToPnCache.set(lidJid, pnJid)
+}
+
+function getMappedPn(lid) {
+    const lidJid = normalizeLidJid(lid)
+    return lidJid ? lidToPnCache.get(lidJid) : undefined
+}
+
+function updateLidMappingsFromMessage(msg) {
+    const key = msg?.key || {}
+    storeLidMapping(key.senderLid, key.senderPn)
+    storeLidMapping(key.participantLid, key.participantPn)
+    storeLidMapping(key.remoteJid, key.remoteJidAlt)
+    storeLidMapping(key.remoteJid, key.senderPn)
+    storeLidMapping(msg?.senderLid, msg?.senderPn)
+    storeLidMapping(msg?.participantLid, msg?.participantPn)
+}
+
+function updateLidMappingsFromMetadata(metadata) {
+    for (const participant of metadata?.participants || []) {
+        const lid = participant?.lid || (participant?.id?.endsWith('@lid') ? participant.id : '')
+        const pn = participant?.pn || participant?.jid || (participant?.id?.endsWith('@s.whatsapp.net') ? participant.id : '')
+        storeLidMapping(lid, pn)
+    }
+}
+
 const store = {
     messages: {},
+    messageIndex: new Map(),
+    messageJidIndex: new Map(),
     contacts: {},
     chats: {},
     groupMetadata: async (jid) => {
@@ -214,17 +269,20 @@ const store = {
     bind: function(ev) {
         ev.on('messages.upsert', ({ messages }) => {
             for (const msg of messages || []) {
-                const jid = msg?.key?.remoteJid
+                const jid = normalizeJid(msg?.key?.remoteJid)
                 const id = msg?.key?.id
                 if (!jid || !id) continue
+                updateLidMappingsFromMessage(msg)
                 if (!this.messages[jid]) this.messages[jid] = {}
                 this.messages[jid][id] = msg
+                this.messageJidIndex.set(`${jid}:${id}`, msg)
+                this.messageIndex.set(id, msg)
             }
         })
         ev.on('contacts.update', (contacts) => {
             for (const contact of contacts || []) {
                 if (contact.id) {
-                    this.contacts[contact.id] = contact
+                    this.contacts[normalizeJid(contact.id)] = contact
                 }
             }
         })
@@ -233,7 +291,24 @@ const store = {
         })
     },
     loadMessage: async function(jid, id) {
-        return this.messages[jid]?.[id] || null
+        const normalizedJid = normalizeJid(jid)
+        if (!normalizedJid || !id) return null
+        const exact = this.messages[normalizedJid]?.[id] || this.messageJidIndex.get(`${normalizedJid}:${id}`)
+        if (exact) return exact
+        const mappedPn = getMappedPn(normalizedJid)
+        if (mappedPn) {
+            const mapped = this.messages[mappedPn]?.[id] || this.messageJidIndex.get(`${mappedPn}:${id}`)
+            if (mapped) return mapped
+        }
+        const message = this.messageIndex.get(id)
+        if (message) {
+            const messageJid = normalizeJid(message?.key?.remoteJid)
+            if (messageJid === normalizedJid || (mappedPn && messageJid === mappedPn)) return message
+            const messagePn = normalizePnJid(message?.key?.senderPn || message?.key?.participantPn)
+            const requestedPn = normalizePnJid(normalizedJid)
+            if (requestedPn && messagePn && requestedPn === messagePn) return message
+        }
+        return null
     }
 }
 let owner = readJson(OWNER_FILE, [])
@@ -279,7 +354,43 @@ const {  state, saveCreds } =await useMultiFileAuthState(`./session`)
    let reconnecting = false
     const msgRetryCounterCache = new NodeCache()
     const groupMetadataCache = new NodeCache({ stdTTL: 5 * 60, useClones: false })
-    const handledMessages = new Set()
+    const handledMessages = new Map()
+const MESSAGE_DEDUPE_TTL = 30 * 60 * 1000
+const MESSAGE_DEDUPE_MAX = 20000
+
+function getMessageDedupeKey(key) {
+    if (!key?.id) return ''
+    return `${normalizeJid(key.remoteJid)}:${key.id}`
+}
+
+function hasProcessedMessage(key) {
+    const dedupeKey = getMessageDedupeKey(key)
+    if (!dedupeKey) return false
+    const now = Date.now()
+    const timestamp = handledMessages.get(dedupeKey)
+    if (!timestamp) return false
+    if (now - timestamp > MESSAGE_DEDUPE_TTL) {
+        handledMessages.delete(dedupeKey)
+        return false
+    }
+    return true
+}
+
+function markMessageProcessed(key) {
+    const dedupeKey = getMessageDedupeKey(key)
+    if (!dedupeKey) return
+    handledMessages.set(dedupeKey, Date.now())
+    if (handledMessages.size <= MESSAGE_DEDUPE_MAX) return
+    const oldest = handledMessages.keys().next().value
+    if (oldest) handledMessages.delete(oldest)
+}
+
+setInterval(() => {
+    const now = Date.now()
+    for (const [id, timestamp] of handledMessages) {
+        if (now - timestamp > MESSAGE_DEDUPE_TTL) handledMessages.delete(id)
+    }
+}, 5 * 60 * 1000)
     const BOT_START_TIME = Date.now()
     const EliteProTech = makeWASocket({
         version,
@@ -294,10 +405,14 @@ const {  state, saveCreds } =await useMultiFileAuthState(`./session`)
       generateHighQualityLinkPreview: true, 
       syncFullHistory: false,
 	  shouldSyncHistoryMessage: () => false,
-      getMessage: async (key) => { try {
-      const msg = await store.loadMessage(key.remoteJid, key.id)
-      return msg?.message || undefined } catch { return undefined }
-	  },
+      getMessage: async (key) => {
+        try {
+            const msg = await store.loadMessage(key?.remoteJid, key?.id)
+            return msg?.message || undefined
+        } catch {
+            return undefined
+        }
+      },
       msgRetryCounterCache,
       cachedGroupMetadata: async (jid) => groupMetadataCache.get(jid),
       defaultQueryTimeoutMs: undefined,
@@ -308,7 +423,10 @@ const {  state, saveCreds } =await useMultiFileAuthState(`./session`)
        if (cached) return cached
        try {
            const fresh = await _rawGroupMetadata(jid)
-           if (fresh) groupMetadataCache.set(jid, fresh)
+           if (fresh) {
+                updateLidMappingsFromMetadata(fresh)
+                groupMetadataCache.set(jid, fresh)
+            }
            return fresh
        } catch (err) {
            return {}
@@ -519,6 +637,25 @@ async function handleAntiStatus(EliteProTech, mek) {
 // AUTOREACT MESSAGE
 const emojiFile = path.join(__dirname, './database/autoreact.json')
 let emojis = []
+const reactedMessages = new Map()
+const REACTION_DEDUPE_TTL = 30 * 60 * 1000
+
+function hasReactedToMessage(key) {
+    if (!key?.id) return false
+    const id = `${key.remoteJid || ''}:${key.id}`
+    const timestamp = reactedMessages.get(id)
+    if (!timestamp) return false
+    if (Date.now() - timestamp > REACTION_DEDUPE_TTL) {
+        reactedMessages.delete(id)
+        return false
+    }
+    return true
+}
+
+function markMessageReacted(key) {
+    if (!key?.id) return
+    reactedMessages.set(`${key.remoteJid || ''}:${key.id}`, Date.now())
+}
 
 function loadEmojis() {
     try {
@@ -543,6 +680,8 @@ async function handleAutoReact(EliteProTech, mek) {
 
         const jid = mek.key.remoteJid
         if (jid === 'status@broadcast') return
+        if (hasReactedToMessage(mek.key)) return
+        markMessageReacted(mek.key)
 
         const chatType = jid.endsWith('@g.us') ? 'Group' : 'DM'
         const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)]
@@ -561,7 +700,18 @@ async function handleAutoReact(EliteProTech, mek) {
     }
 }
 //CHATBOT CODES//
-const chatbotProcessedMessages=new Set()
+const chatbotProcessedMessages = new Map()
+const CHATBOT_DEDUPE_TTL = 30 * 60 * 1000
+
+function cleanupChatbotProcessedMessages() {
+    const now = Date.now()
+    for (const [key, timestamp] of chatbotProcessedMessages) {
+        if (now - timestamp > CHATBOT_DEDUPE_TTL) chatbotProcessedMessages.delete(key)
+    }
+}
+
+setInterval(cleanupChatbotProcessedMessages, 5 * 60 * 1000)
+
 async function handleChatbot(EliteProTech,mek){
     try{
         if(!mek?.message||!mek?.key||mek.key.fromMe)return
@@ -569,8 +719,7 @@ async function handleChatbot(EliteProTech,mek){
         if(!from||from==='status@broadcast')return
         const messageKey=`${from}:${mek.key.id}`
         if(chatbotProcessedMessages.has(messageKey))return
-        chatbotProcessedMessages.add(messageKey)
-        setTimeout(()=>chatbotProcessedMessages.delete(messageKey),60000)
+        chatbotProcessedMessages.set(messageKey, Date.now())
         let chatbotData={global:false,dm:false,group:false,chats:{}}
         try{
             const data=fs.readFileSync('./database/chatbot.json','utf8')
@@ -852,13 +1001,8 @@ function loadMessage(remoteJid, msgId) {
         return null
     }
 }
-async function waitForSavedMessage(remoteJid, msgId, attempts = 10, delay = 100) {
-    for (let i = 0; i < attempts; i++) {
-        const old = loadMessage(remoteJid, msgId)
-        if (old?.message) return old
-        await new Promise(resolve => setTimeout(resolve, delay))
-    }
-    return null
+function waitForSavedMessage(remoteJid, msgId) {
+    return loadMessage(remoteJid, msgId)
 }
 
 async function restoreMessage(EliteProTech, from, note, msg, quoted, mentions) {
@@ -1063,9 +1207,8 @@ EliteProTech.ev.on('messages.upsert', async chatUpdate => {
         for (const mek of messages) {
             if (!mek?.message || !mek?.key?.id) continue
             const msgId = mek.key.id
-            if (handledMessages.has(msgId)) continue
-            handledMessages.add(msgId)
-            setTimeout(() => handledMessages.delete(msgId), 60000)
+            if (hasProcessedMessage(mek.key)) continue
+            markMessageProcessed(mek.key)
             const rawTs = mek.messageTimestamp
             const msgTimestamp = (typeof rawTs === 'object' ? (rawTs?.toNumber?.() ?? rawTs?.low ?? 0) : (rawTs ?? 0)) * 1000
             if (msgTimestamp && msgTimestamp < BOT_START_TIME) continue
@@ -1119,7 +1262,7 @@ EliteProTech.ev.on('contacts.update', update => {
 })
 
     EliteProTech.getName = (jid, withoutContact = false) => {
-        id = EliteProTech.decodeJid(jid)
+        const id = EliteProTech.decodeJid(jid)
         withoutContact = EliteProTech.withoutContact || withoutContact
         let v
         if (id.endsWith("@g.us")) return new Promise(async (resolve) => {
@@ -1385,14 +1528,6 @@ setInterval(cleanSessionFiles, 8 * 60 * 60 * 1000);
     }
     }
 return startEliteProTech()
-
-let file = require.resolve(__filename)
-fs.watchFile(file, () => {
-    fs.unwatchFile(file)
-    console.log(chalk.redBright(`Update ${__filename}`))
-    delete require.cache[file]
-    require(file)
-})
 
 process.on('uncaughtException', function (err) {
 let e = String(err)
