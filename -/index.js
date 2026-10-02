@@ -108,7 +108,11 @@ watchBackupFile(SETTINGS_FILE)
 watchBackupFile(OWNER_FILE)
 
 async function restoreBotData(jid) {
-    if (remoteSettingsRestored || !global.dbSite) return
+    if (remoteSettingsRestored) return
+    if (!global.dbSite) {
+        remoteSettingsRestored = true
+        return
+    }
     const number = getDatabaseIdentity(jid)
     if (!number) return
     remoteSettingsNumber = number
