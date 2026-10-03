@@ -184,13 +184,11 @@ const FileType = require('file-type')
 const axios = require('axios')
 const PhoneNumber = require('awesome-phonenumber')
 const { imageToWebp, videoToWebp, writeExifImg, writeExifVid } = require('./lib/exif')
-const { smsg, isUrl, generateMessageTag, getBuffer, getSizeMedia, fetch, sleep, reSize, getGroupAdmins } = require('./lib/myfunc')
-const { default: EliteProTechConnect, delay, makeCacheableSignalKeyStore, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, generateForwardMessageContent, prepareWAMessageMedia, generateWAMessageFromContent, generateMessageID, downloadContentFromMessage, makeInMemoryStore, jidDecode, proto } = require("baileys")
+const { smsg, isUrl, getBuffer, reSize } = require('./lib/myfunc')
+const { default: makeWASocket, makeCacheableSignalKeyStore, useMultiFileAuthState, fetchLatestBaileysVersion, downloadContentFromMessage, jidDecode } = require("baileys")
 const NodeCache = require("node-cache")
 const Pino = require("pino")
 const readline = require("readline")
-const { parsePhoneNumber } = require("libphonenumber-js")
-const makeWASocket = require("baileys").default
 let EliteProHandler = require("./ElitePro")
 const setupConsoleFilters = require('./lib/filter')
 const http = require('http')
@@ -472,7 +470,6 @@ setInterval(() => {
       }
    }
 //AUTO STATUS WATCHER//
-const processedStatusMessages = new Set()
 function resolveStatusTarget(EliteProTech, mek) {
     const candidates = [
         mek?.key?.participantPn,
@@ -506,12 +503,6 @@ async function handleStatusWatcher(EliteProTech, mek) {
 
         const msgId = mek.key.id
 
-        if (processedStatusMessages.has(msgId)) return
-        processedStatusMessages.add(msgId)
-
-        setTimeout(() => {
-            processedStatusMessages.delete(msgId)
-        }, 5 * 60 * 1000)
 
         const participantJid = resolveStatusTarget(EliteProTech, mek)
         if (!participantJid) return
@@ -704,26 +695,11 @@ async function handleAutoReact(EliteProTech, mek) {
     }
 }
 //CHATBOT CODES//
-const chatbotProcessedMessages = new Map()
-const CHATBOT_DEDUPE_TTL = 30 * 60 * 1000
-
-function cleanupChatbotProcessedMessages() {
-    const now = Date.now()
-    for (const [key, timestamp] of chatbotProcessedMessages) {
-        if (now - timestamp > CHATBOT_DEDUPE_TTL) chatbotProcessedMessages.delete(key)
-    }
-}
-
-setInterval(cleanupChatbotProcessedMessages, 5 * 60 * 1000)
-
 async function handleChatbot(EliteProTech,mek){
     try{
         if(!mek?.message||!mek?.key||mek.key.fromMe)return
         const from=mek.key.remoteJid
         if(!from||from==='status@broadcast')return
-        const messageKey=`${from}:${mek.key.id}`
-        if(chatbotProcessedMessages.has(messageKey))return
-        chatbotProcessedMessages.set(messageKey, Date.now())
         let chatbotData={global:false,dm:false,group:false,chats:{}}
         try{
             const data=fs.readFileSync('./database/chatbot.json','utf8')
