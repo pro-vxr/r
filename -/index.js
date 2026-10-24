@@ -1,35 +1,10 @@
-import { spawn } from 'node:child_process';
-import fs from 'node:fs';
-import path from 'node:path';
-import http from 'node:http';
-import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
-import makeWASocket, {
-    DisconnectReason,
-    downloadContentFromMessage,
-    downloadMediaMessage,
-    extractMessageContent,
-    fetchLatestBaileysVersion,
-    jidDecode,
-    makeCacheableSignalKeyStore,
-    WAMessageStubType,
-    useMultiFileAuthState
-} from 'baileys';
-import './config.js';
-import { imageToWebp, videoToWebp, writeExifImg, writeExifVid } from './lib/exif.js';
-import { smsg, isUrl, getBuffer, reSize } from './lib/myfunc.js';
-import setupConsoleFilters from './lib/filter.js';
-
-const require = createRequire(import.meta.url);
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
+const { spawn } = require("child_process");
 if (process.argv[2] !== "--child") {
     let childProcess;
     let shuttingDown = false;
     
     function launch() {
-        childProcess = spawn(process.execPath, [__filename, "--child"], {
+        childProcess = spawn("node", ["index.js", "--child"], {
             stdio: ["inherit", "inherit", "inherit", "ipc"]
         });
         
@@ -56,8 +31,11 @@ if (process.argv[2] !== "--child") {
     process.once("SIGINT", () => shutdown("SIGINT"));
     process.once("SIGTERM", () => shutdown("SIGTERM"));
     launch();
-} else {
-const { default: EliteProHandlerModule } = await import('./ElitePro.js');
+    return;
+}
+const path = require('path');
+const fs = require('fs');
+require('./config')
 const BOT_ID = 'elite-pro-v1'
 const SETTINGS_FILE = path.join(__dirname, 'database', 'settings.json')
 const OWNER_FILE = path.join(__dirname, 'database', 'owner.json')
@@ -69,8 +47,6 @@ try {
     }
 } catch {}
 global.botMode = savedSettings.mode || 'private'
-let userChatCleanupInterval
-let sessionCleanupInterval
 
 function isPlainObject(value) {
     return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -154,7 +130,8 @@ async function restoreBotData(jid) {
         savedSettings = backup.botSettings
         applyBotSettings(backup.botSettings)
         remoteSettingsRestored = true
-        EliteProHandler = EliteProHandlerModule
+        delete require.cache[require.resolve('./ElitePro')]
+        EliteProHandler = require('./ElitePro')
         console.log('Settings backup restored')
     } catch (err) {
         if (err.response?.status !== 404) console.warn(`Settings restore failed: ${err.message}`)
@@ -201,19 +178,24 @@ if (!fs.existsSync(__dirname + '/session/creds.json') && global.sessionid) {
     }
 }
 const pino = require('pino')
-const mediaDownloadLogger = pino({ level: 'silent' })
+const { Boom } = require('@hapi/boom')
 const chalk = require('chalk')
 const FileType = require('file-type')
 const axios = require('axios')
 const PhoneNumber = require('awesome-phonenumber')
+const { imageToWebp, videoToWebp, writeExifImg, writeExifVid } = require('./lib/exif')
+const { smsg, isUrl, getBuffer, reSize } = require('./lib/myfunc')
+const { default: makeWASocket, makeCacheableSignalKeyStore, useMultiFileAuthState, fetchLatestBaileysVersion, downloadContentFromMessage, jidDecode } = require("baileys")
 const NodeCache = require("node-cache")
 const Pino = require("pino")
 const readline = require("readline")
-let EliteProHandler = EliteProHandlerModule
+let EliteProHandler = require("./ElitePro")
+const setupConsoleFilters = require('./lib/filter')
+const http = require('http')
 setupConsoleFilters()
-const PORT = Number(process.env.PORT || process.env.SERVER_PORT || 3000);
+const PORT = process.env.PORT || 3000;
 const INDEX_PATH = path.join(__dirname, 'lib', 'index.html');
-const healthServer = http.createServer((req, res) => {
+http.createServer((req, res) => {
     fs.readFile(INDEX_PATH, (err, data) => {
         if (err) {
             res.writeHead(404);
@@ -222,22 +204,13 @@ const healthServer = http.createServer((req, res) => {
         res.writeHead(200, { 'Content-Type': 'text/html' });
         res.end(data);
     });
-});
-healthServer.on('error', (err) => {
-    if (err.code === 'EADDRINUSE') {
-        console.warn(`[HTTP] Port ${PORT} is already in use. Set PORT or SERVER_PORT to the port assigned by your host.`);
-        return;
-    }
-    console.error('[HTTP] Health page server error:', err.message);
-});
-healthServer.listen(PORT, '0.0.0.0');
+}).listen(PORT, "0.0.0.0", () => {});
 
 const lidToPnCache = new NodeCache({
     stdTTL: 24 * 60 * 60,
     useClones: false,
     checkperiod: 300
 })
-let lidResolverSocket
 
 function normalizeJid(jid) {
     if (!jid) return ''
@@ -247,19 +220,19 @@ function normalizeJid(jid) {
 function normalizePnJid(jid) {
     const value = normalizeJid(jid)
     if (!value) return ''
-    if (value.endsWith('@s.whatsapp.net') || value.endsWith('@hosted')) return value
+    if (value.endsWith('@s.whatsapp.net')) return value
     if (/^\d+$/.test(value)) return `${value}@s.whatsapp.net`
     return ''
 }
 
 function normalizeLidJid(jid) {
     const value = normalizeJid(jid)
-    return value.endsWith('@lid') || value.endsWith('@hosted.lid') ? value : ''
+    return value.endsWith('@lid') ? value : ''
 }
 
 function storeLidMapping(lid, pn) {
-    const lidJid = normalizeLidJid(lid) || normalizeLidJid(pn)
-    const pnJid = normalizePnJid(lid) || normalizePnJid(pn)
+    const lidJid = normalizeLidJid(lid)
+    const pnJid = normalizePnJid(pn)
     if (lidJid && pnJid) lidToPnCache.set(lidJid, pnJid)
 }
 
@@ -272,7 +245,6 @@ function updateLidMappingsFromMessage(msg) {
     const key = msg?.key || {}
     storeLidMapping(key.senderLid, key.senderPn)
     storeLidMapping(key.participantLid, key.participantPn)
-    storeLidMapping(key.participant, key.participantAlt)
     storeLidMapping(key.remoteJid, key.remoteJidAlt)
     storeLidMapping(key.remoteJid, key.senderPn)
     storeLidMapping(msg?.senderLid, msg?.senderPn)
@@ -282,14 +254,13 @@ function updateLidMappingsFromMessage(msg) {
 function updateLidMappingsFromMetadata(metadata) {
     for (const participant of metadata?.participants || []) {
         const lid = participant?.lid || (participant?.id?.endsWith('@lid') ? participant.id : '')
-        const pn = participant?.phoneNumber || participant?.pn || participant?.jid ||
-            (participant?.id?.endsWith('@s.whatsapp.net') ? participant.id : '')
+        const pn = participant?.pn || participant?.jid || (participant?.id?.endsWith('@s.whatsapp.net') ? participant.id : '')
         storeLidMapping(lid, pn)
     }
 }
 
-const MAX_STORED_MESSAGES = 10000
 const store = {
+    messages: {},
     messageIndex: new Map(),
     messageJidIndex: new Map(),
     contacts: {},
@@ -300,27 +271,14 @@ const store = {
     bind: function(ev) {
         ev.on('messages.upsert', ({ messages }) => {
             for (const msg of messages || []) {
-                // Baileys may emit a revoke under the deleted message's key. Never let
-                // that protocol notice replace the original payload in the memory cache.
-                if (msg?.message?.protocolMessage?.type === 0 ||
-                    msg?.messageStubType === WAMessageStubType.REVOKE) continue
                 const jid = normalizeJid(msg?.key?.remoteJid)
                 const id = msg?.key?.id
                 if (!jid || !id) continue
                 updateLidMappingsFromMessage(msg)
-                const cacheKey = `${jid}:${id}`
-                this.messageJidIndex.delete(cacheKey)
-                this.messageJidIndex.set(cacheKey, msg)
-                this.messageIndex.delete(id)
+                if (!this.messages[jid]) this.messages[jid] = {}
+                this.messages[jid][id] = msg
+                this.messageJidIndex.set(`${jid}:${id}`, msg)
                 this.messageIndex.set(id, msg)
-                while (this.messageJidIndex.size > MAX_STORED_MESSAGES) {
-                    const oldestKey = this.messageJidIndex.keys().next().value
-                    const oldestMessage = this.messageJidIndex.get(oldestKey)
-                    this.messageJidIndex.delete(oldestKey)
-                    if (oldestMessage?.key?.id && this.messageIndex.get(oldestMessage.key.id) === oldestMessage) {
-                        this.messageIndex.delete(oldestMessage.key.id)
-                    }
-                }
             }
         })
         ev.on('contacts.update', (contacts) => {
@@ -337,19 +295,11 @@ const store = {
     loadMessage: async function(jid, id) {
         const normalizedJid = normalizeJid(jid)
         if (!normalizedJid || !id) return null
-        const exact = this.messageJidIndex.get(`${normalizedJid}:${id}`)
+        const exact = this.messages[normalizedJid]?.[id] || this.messageJidIndex.get(`${normalizedJid}:${id}`)
         if (exact) return exact
-        let mappedPn = getMappedPn(normalizedJid)
-        if (!mappedPn && normalizeLidJid(normalizedJid)) {
-            try {
-                mappedPn = await lidResolverSocket?.signalRepository?.lidMapping?.getPNForLID?.(normalizedJid)
-                if (mappedPn) {
-                    storeLidMapping(normalizedJid, mappedPn)
-                }
-            } catch {}
-        }
+        const mappedPn = getMappedPn(normalizedJid)
         if (mappedPn) {
-            const mapped = this.messageJidIndex.get(`${mappedPn}:${id}`)
+            const mapped = this.messages[mappedPn]?.[id] || this.messageJidIndex.get(`${mappedPn}:${id}`)
             if (mapped) return mapped
         }
         const message = this.messageIndex.get(id)
@@ -359,19 +309,6 @@ const store = {
             const messagePn = normalizePnJid(message?.key?.senderPn || message?.key?.participantPn)
             const requestedPn = normalizePnJid(normalizedJid)
             if (requestedPn && messagePn && requestedPn === messagePn) return message
-
-            // Baileys can emit the revoke key with the deleting device's LID/chat
-            // perspective. Message IDs are generated uniquely; accept an ID-only
-            // match only if it appears once in our bounded cache.
-            let duplicateId = false
-            for (const candidate of this.messageJidIndex.values()) {
-                if (candidate !== message && candidate?.key?.id === id) {
-                    duplicateId = true
-                    break
-                }
-            }
-            if (!duplicateId) return message
-
         }
         return null
     }
@@ -428,22 +365,6 @@ function getMessageDedupeKey(key) {
     return `${normalizeJid(key.remoteJid)}:${key.id}`
 }
 
-function getDisconnectStatus(lastDisconnect) {
-    try {
-        const error = lastDisconnect?.error
-        const statusCode = error?.output?.statusCode ??
-            error?.statusCode ??
-            error?.data?.statusCode ??
-            error?.data?.output?.statusCode ??
-            error?.cause?.output?.statusCode ??
-            error?.cause?.statusCode ??
-            error?.cause?.data?.statusCode
-        return Number(statusCode) || 0
-    } catch {
-        return 0
-    }
-}
-
 function hasProcessedMessage(key) {
     const dedupeKey = getMessageDedupeKey(key)
     if (!dedupeKey) return false
@@ -466,6 +387,12 @@ function markMessageProcessed(key) {
     if (oldest) handledMessages.delete(oldest)
 }
 
+setInterval(() => {
+    const now = Date.now()
+    for (const [id, timestamp] of handledMessages) {
+        if (now - timestamp > MESSAGE_DEDUPE_TTL) handledMessages.delete(id)
+    }
+}, 5 * 60 * 1000)
     const BOT_START_TIME = Date.now()
     const EliteProTech = makeWASocket({
         version,
@@ -492,7 +419,6 @@ function markMessageProcessed(key) {
       cachedGroupMetadata: async (jid) => groupMetadataCache.get(jid),
       defaultQueryTimeoutMs: undefined,
    })
-   lidResolverSocket = EliteProTech
    const _rawGroupMetadata = EliteProTech.groupMetadata.bind(EliteProTech)
    EliteProTech.groupMetadata = async (jid) => {
        const cached = groupMetadataCache.get(jid)
@@ -517,9 +443,6 @@ function markMessageProcessed(key) {
    })
    EliteProTech.ev.on('group-participants.update', ({ id }) => {
        if (id) groupMetadataCache.del(id)
-   })
-   EliteProTech.ev.on('lid-mapping.update', ({ lid, pn }) => {
-       storeLidMapping(lid, pn)
    })
 
    store.bind(EliteProTech.ev)
@@ -547,39 +470,23 @@ function markMessageProcessed(key) {
       }
    }
 //AUTO STATUS WATCHER//
-async function resolveStatusTarget(EliteProTech, mek) {
-    const key = mek?.key || {}
+function resolveStatusTarget(EliteProTech, mek) {
     const candidates = [
-        key.participantPn,
+        mek?.key?.participantPn,
         mek?.participantPn,
-        key.participantAlt,
-        key.remoteJidAlt,
-        key.participant,
+        mek?.key?.participant,
         mek?.participant,
-        mek?.sender
-    ].filter(Boolean).map(jid => EliteProTech.decodeJid?.(jid) || jid)
-
-    for (const jid of candidates) {
-        const phoneJid = normalizePnJid(jid)
-        if (phoneJid) return phoneJid
+        mek?.sender,
+        mek?.key?.remoteJid
+    ].filter(Boolean)
+    for (let jid of candidates) {
+        if (EliteProTech.decodeJid) jid = EliteProTech.decodeJid(jid)
+        if (jid?.endsWith('@s.whatsapp.net')) return jid
     }
-
-    for (const jid of candidates) {
-        const lidJid = normalizeLidJid(jid)
-        if (!lidJid) continue
-        let phoneJid = getMappedPn(lidJid)
-        if (!phoneJid) {
-            try {
-                phoneJid = await EliteProTech.signalRepository?.lidMapping?.getPNForLID?.(lidJid)
-            } catch {}
-        }
-        phoneJid = normalizePnJid(phoneJid)
-        if (phoneJid) {
-            storeLidMapping(lidJid, phoneJid)
-            return phoneJid
-        }
+    for (let jid of candidates) {
+        if (EliteProTech.decodeJid) jid = EliteProTech.decodeJid(jid)
+        if (jid) return jid
     }
-
     return null
 }
 
@@ -597,25 +504,19 @@ async function handleStatusWatcher(EliteProTech, mek) {
         const msgId = mek.key.id
 
 
-        const participantJid = await resolveStatusTarget(EliteProTech, mek)
+        const participantJid = resolveStatusTarget(EliteProTech, mek)
         if (!participantJid) return
-        const ownPn = normalizePnJid(state.creds.me?.id || EliteProTech.user?.id)
-        if (ownPn && participantJid === ownPn) return
 
         const statusKey = {
-            ...mek.key,
             remoteJid: 'status@broadcast',
             id: msgId,
             fromMe: false,
-            participant: mek.key.participant || participantJid
+            participant: participantJid
         }
 
         if (global.autoviewstatus) {
-            try {
-                await EliteProTech.readMessages([statusKey])
-            } catch (err) {
-                console.error('❌ Status view error:', err.message)
-            }
+            await EliteProTech.readMessages([statusKey])
+            console.log(`👀 Viewed status from ${participantJid}`)
         }
 
         if (!global.autolikestatus) return
@@ -862,20 +763,17 @@ ${history}
         }
     }
 }
-if (!userChatCleanupInterval) {
-    userChatCleanupInterval = setInterval(() => {
-        if (!global.userChatTimestamps || !global.userChats) return
-        const now = Date.now()
-        for (const user in global.userChatTimestamps) {
-            if (now - global.userChatTimestamps[user] > 30 * 60 * 1000) {
-                delete global.userChats[user]
-                delete global.userChatTimestamps[user]
-                console.log(`🧹 Cleared memory for inactive user: ${user}`)
-            }
+setInterval(()=>{
+    if(!global.userChatTimestamps||!global.userChats)return
+    const now=Date.now()
+    for(const user in global.userChatTimestamps){
+        if(now-global.userChatTimestamps[user]>30*60*1000){
+            delete global.userChats[user]
+            delete global.userChatTimestamps[user]
+            console.log(`🧹 Cleared memory for inactive user: ${user}`)
         }
-    }, 10 * 60 * 1000)
-    userChatCleanupInterval.unref?.()
-}
+    }
+},10*60*1000)
 //ANTILINK DETECT//
 async function handleAntiLink(EliteProTech, mek) {
     try {
@@ -1030,7 +928,12 @@ async function handleChannelReact(EliteProTech, mek) {
     }
 }
 //ANTIDELETE CODES//
+const { downloadMediaMessage } = require('baileys')
+const antiDeleteDir = path.join(__dirname, 'anti_delete')
 const settingsFile = path.join(__dirname, 'database', 'settings.json')
+if (!fs.existsSync(antiDeleteDir)) {
+    fs.mkdirSync(antiDeleteDir, { recursive: true })
+}
 function getAntiDeleteStatus() {
     try {
         const settings = JSON.parse(fs.readFileSync(settingsFile, 'utf8'))
@@ -1053,109 +956,117 @@ function setAntiDeleteStatus(enabled) {
 }
 global.getAntiDeleteStatus = getAntiDeleteStatus
 global.setAntiDeleteStatus = setAntiDeleteStatus
-
-function getRestorableText(content) {
-    const candidates = [
-        content?.conversation,
-        content?.extendedTextMessage?.text,
-        content?.imageMessage?.caption,
-        content?.videoMessage?.caption,
-        content?.ptvMessage?.caption,
-        content?.documentMessage?.caption,
-        content?.audioMessage?.caption,
-        content?.buttonsResponseMessage?.selectedDisplayText,
-        content?.buttonsResponseMessage?.selectedButtonId,
-        content?.listResponseMessage?.singleSelectReply?.selectedRowId,
-        content?.templateButtonReplyMessage?.selectedDisplayText,
-        content?.templateButtonReplyMessage?.selectedId,
-        content?.interactiveResponseMessage?.body?.text,
-        content?.messageContextInfo?.selectedButtonId,
-        content?.messageContextInfo?.selectedRowId
-    ]
-    const text = candidates.find(value => typeof value === 'string' && value.trim())
-    if (text) return text
-
-    // Some Baileys wrappers (or cached legacy messages) nest the payload more deeply.
-    const seen = new WeakSet()
-    const findNestedText = (value, depth = 0) => {
-        if (!value || typeof value !== 'object' || Buffer.isBuffer(value) || depth > 5 || seen.has(value)) return ''
-        seen.add(value)
-        for (const key of ['conversation', 'text', 'caption', 'contentText', 'selectedDisplayText', 'selectedButtonId', 'selectedId']) {
-            if (typeof value[key] === 'string' && value[key].trim()) return value[key]
-        }
-        for (const child of Object.values(value)) {
-            const nested = findNestedText(child, depth + 1)
-            if (nested) return nested
-        }
-        return ''
+	
+function saveMessage(remoteJid, msgId, msg) {
+    const filePath = path.join(antiDeleteDir, `${remoteJid}_${msgId}.json`)
+    const minimalMsg = {
+        key: msg.key,
+        message: msg.message,
+        pushName: msg.pushName,
+        _ts: Date.now()
     }
-    return findNestedText(content)
+
+    try {
+        fs.writeFileSync(filePath, JSON.stringify(minimalMsg, null, 2))
+    } catch (err) {
+        console.error('❌ Error saving message:', err.message)
+    }
+}
+
+function loadMessage(remoteJid, msgId) {
+    const filePath = path.join(antiDeleteDir, `${remoteJid}_${msgId}.json`)
+    try {
+        return JSON.parse(fs.readFileSync(filePath, 'utf8'))
+    } catch {
+        return null
+    }
+}
+function waitForSavedMessage(remoteJid, msgId) {
+    return loadMessage(remoteJid, msgId)
 }
 
 async function restoreMessage(EliteProTech, from, note, msg, quoted, mentions) {
     try {
-        const rawContent = msg?.message && typeof msg.message === 'object' ? msg.message : msg
-        const contentMessage = extractMessageContent(rawContent) || rawContent
+        if (msg.conversation) {
+            return EliteProTech.sendMessage(
+                from,
+                { text: `${note}\n♻️ *Message:* \`\`\`${msg.conversation}\`\`\``, mentions },
+                { quoted }
+            )
+        }
+
+        if (msg.extendedTextMessage?.text) {
+            return EliteProTech.sendMessage(
+                from,
+                { text: `${note}\n♻️ *Message:* \`\`\`${msg.extendedTextMessage.text}\`\`\``, mentions },
+                { quoted }
+            )
+        }
+
         const sendNote = async () =>
             EliteProTech.sendMessage(from, { text: note, mentions }, { quoted })
 
-        const mediaTypes = [
-            ['imageMessage', 'image'],
-            ['videoMessage', 'video'],
-            ['ptvMessage', 'video'],
-            ['audioMessage', 'audio'],
-            ['stickerMessage', 'sticker'],
-            ['documentMessage', 'document']
-        ]
-        const mediaEntry = mediaTypes.find(([messageType]) => contentMessage[messageType])
-        if (mediaEntry) {
-            const [messageType, contentType] = mediaEntry
-            const mediaDetails = contentMessage[messageType]
-            const downloadableMessage = { ...quoted, message: contentMessage }
-            const downloadOptions = {
-                reuploadRequest: EliteProTech.updateMediaMessage.bind(EliteProTech),
-                logger: mediaDownloadLogger
-            }
-            let media
-            try {
-                media = await downloadMediaMessage(downloadableMessage, 'buffer', {}, downloadOptions)
-            } catch (error) {
-                const status = Number(error?.status ?? error?.statusCode ?? error?.output?.statusCode)
-                if (![404, 410].includes(status)) throw error
-                const refreshedMessage = await EliteProTech.updateMediaMessage(downloadableMessage)
-                media = await downloadMediaMessage(refreshedMessage, 'buffer', {}, downloadOptions)
-            }
-            const content = { [contentType]: media }
-            if (contentType === 'image' || contentType === 'video') {
-                if (mediaDetails.caption) content.caption = mediaDetails.caption
-                if (mediaDetails.mimetype) content.mimetype = mediaDetails.mimetype
-                if (mediaDetails.gifPlayback) content.gifPlayback = true
-            }
-            if (messageType === 'audioMessage') {
-                content.ptt = mediaDetails.ptt
-                content.mimetype = mediaDetails.mimetype || 'audio/mpeg'
-            } else if (messageType === 'documentMessage') {
-                content.fileName = mediaDetails.fileName || 'restored.file'
-                content.mimetype = mediaDetails.mimetype || 'application/octet-stream'
-                if (mediaDetails.caption) content.caption = mediaDetails.caption
-            }
-            await EliteProTech.sendMessage(from, content, { quoted })
+        if (msg.imageMessage) {
+            const media = await downloadMediaMessage(quoted, 'buffer', {}, {
+                reuploadRequest: EliteProTech.updateMediaMessage
+            })
+            await EliteProTech.sendMessage(from, { image: media }, { quoted })
             return sendNote()
         }
 
-        const text = getRestorableText(contentMessage)
-        if (text) {
-            return EliteProTech.sendMessage(
+        if (msg.videoMessage) {
+            const media = await downloadMediaMessage(quoted, 'buffer', {}, {
+                reuploadRequest: EliteProTech.updateMediaMessage
+            })
+            await EliteProTech.sendMessage(from, { video: media }, { quoted })
+            return sendNote()
+        }
+
+        if (msg.audioMessage) {
+            const media = await downloadMediaMessage(quoted, 'buffer', {}, {
+                reuploadRequest: EliteProTech.updateMediaMessage
+            })
+            await EliteProTech.sendMessage(
                 from,
-                { text: `${note}\n♻️ *Message:* \`\`\`${text}\`\`\``, mentions },
+                {
+                    audio: media,
+                    ptt: msg.audioMessage.ptt,
+                    mimetype: msg.audioMessage.mimetype || 'audio/mpeg',
+                    fileName: 'restored.mp3'
+                },
                 { quoted }
             )
+            return sendNote()
+        }
+
+        if (msg.stickerMessage) {
+            const media = await downloadMediaMessage(quoted, 'buffer', {}, {
+                reuploadRequest: EliteProTech.updateMediaMessage
+            })
+            await EliteProTech.sendMessage(from, { sticker: media }, { quoted })
+            return sendNote()
+        }
+
+        if (msg.documentMessage) {
+            const media = await downloadMediaMessage(quoted, 'buffer', {}, {
+                reuploadRequest: EliteProTech.updateMediaMessage
+            })
+            await EliteProTech.sendMessage(
+                from,
+                {
+                    document: media,
+                    fileName: msg.documentMessage.fileName || 'restored.file',
+                    mimetype: msg.documentMessage.mimetype || 'application/octet-stream'
+                },
+                { quoted }
+            )
+            return sendNote()
         }
 
         return EliteProTech.sendMessage(
             from,
             {
-                text: `${note}\n❌ *Cannot restore this message type.*`,
+                text: `${note}\n❌ *Cannot restore deleted media – possibly expired or unsupported.*`,
                 mentions
             },
             { quoted }
@@ -1172,77 +1083,81 @@ async function getChatName(EliteProTech, jid, fallback = jid) {
             return meta.subject || fallback
         }
 
-        let phoneJid = getMappedPn(jid)
-        if (!phoneJid && normalizeLidJid(jid)) {
-            try {
-                phoneJid = await EliteProTech.signalRepository?.lidMapping?.getPNForLID?.(jid) || ''
-                if (phoneJid) storeLidMapping(jid, phoneJid)
-            } catch {}
-        }
-        const contact = EliteProTech.contacts?.[phoneJid] || EliteProTech.contacts?.[jid] || {}
-        return contact.name || contact.verifiedName || contact.notify || phoneJid?.split('@')[0] || fallback
+        const contact = EliteProTech.contacts?.[jid] || {}
+        return contact.name || contact.verifiedName || contact.notify || fallback
     } catch {
         return fallback
     }
 }
 
-const handledDeletes = new Map()
-const HANDLED_DELETE_TTL = 10 * 60 * 1000
-const HANDLED_DELETE_LIMIT = 5000
+const handledDeletes = new Set()
 
-async function handleAntiDeleteEvent(EliteProTech, targetKey, actorKey = {}) {
-    if (!getAntiDeleteStatus()) return
-    const remoteJid = targetKey?.remoteJid
-    const msgId = targetKey?.id
-    if (!remoteJid || !msgId) return
-
-    // A single revoke can be reported with different LID/PN chat perspectives.
-    // Baileys message IDs are unique, so dedupe by target ID across those events.
-    const deleteKey = msgId
+setInterval(() => {
     const now = Date.now()
-    const handledAt = handledDeletes.get(deleteKey)
-    if (handledAt && now - handledAt < HANDLED_DELETE_TTL) return
-    handledDeletes.set(deleteKey, now)
-    while (handledDeletes.size > HANDLED_DELETE_LIMIT) {
-        handledDeletes.delete(handledDeletes.keys().next().value)
+
+    for (const key of [...handledDeletes]) {
+        const [, ts] = key.split('|')
+        if (now - parseInt(ts) > 10 * 60 * 1000) handledDeletes.delete(key)
     }
 
-    const old = await store.loadMessage(remoteJid, msgId)
-    if (!old?.message) {
-        return
-    }
-    if (old.key?.fromMe) return
+    for (const file of fs.readdirSync(antiDeleteDir)) {
+        try {
+            const filePath = path.join(antiDeleteDir, file)
+            const content = JSON.parse(fs.readFileSync(filePath, 'utf8'))
 
-    const deletedByRaw = actorKey.participantPn || actorKey.participantAlt || actorKey.participant ||
-        actorKey.senderPn || actorKey.senderLid || actorKey.remoteJid
-    const sentByRaw = old.key?.participantPn || old.key?.participantAlt || old.key?.participant ||
-        old.key?.senderPn || old.key?.senderLid || old.key?.remoteJid
-    const resolveIdentity = async jid => {
-        if (!jid) return ''
-        const cached = getMappedPn(jid)
-        if (cached) return cached
-        if (normalizeLidJid(jid)) {
-            try {
-                const pn = await EliteProTech.signalRepository?.lidMapping?.getPNForLID?.(jid)
-                if (pn) {
-                    storeLidMapping(jid, pn)
-                    return pn
-                }
-            } catch {}
-        }
-        return jid
+            if (now - (content._ts || 0) > 10 * 60 * 1000) {
+                fs.unlinkSync(filePath)
+            }
+        } catch {}
     }
-    const [deletedBy, sentBy] = await Promise.all([
-        resolveIdentity(deletedByRaw),
-        resolveIdentity(sentByRaw)
-    ])
-    const whoDeleted = `@${String(deletedBy || '').split('@')[0].split(':')[0]}`
-    const whoSent = `@${String(sentBy || '').split('@')[0].split(':')[0]}`
-    const from = EliteProTech.decodeJid(EliteProTech.user?.id || '')
-    if (!from) return
-    const originalChat = old.key?.remoteJid || remoteJid
-    const chatName = await getChatName(EliteProTech, originalChat)
-    const note = `╭━━[ *× ANTI DELETE MESSAGES ×* ]━┉
+}, 60 * 1000)
+
+async function handleAntiDeleteCapture(EliteProTech, mek) {
+    try {
+        if (!getAntiDeleteStatus()) return
+        if (!mek?.message || !mek?.key || mek.key.fromMe) return
+        saveMessage(mek.key.remoteJid, mek.key.id, mek)
+    } catch (err) {
+        console.error('❌ Anti-delete capture error:', err.message)
+    }
+}
+
+EliteProTech.ev.on('messages.update', async updates => {
+    if (!getAntiDeleteStatus()) return
+    for (const update of updates) {
+        const remoteJid = update.key?.remoteJid
+        const msgId = update.key?.id
+        if (!remoteJid || !msgId) continue
+
+        const isDeleted =
+            update.update?.messageStubType === 1 ||
+            update.message?.protocolMessage?.type === 0
+
+        if (!isDeleted) continue
+
+        const baseKey = `${remoteJid}-${msgId}`
+        if ([...handledDeletes].some(e => e.startsWith(baseKey))) continue
+
+        handledDeletes.add(`${baseKey}|${Date.now()}`)
+
+        const old = await waitForSavedMessage(remoteJid, msgId)
+		if (!old?.message) continue
+
+        const deletedBy = update.participant || update.key.participant || remoteJid
+        const sentBy = old.key.participant || old.key.remoteJid
+        const botId = EliteProTech.user.id.split('@')[0]
+
+        if ((deletedBy && deletedBy.includes(botId)) || (sentBy && sentBy.includes(botId))) continue
+
+        const whoDeleted = `@${(deletedBy || '').split('@')[0]}`
+        const whoSent = `@${(sentBy || '').split('@')[0]}`
+
+        const ownerNumber = EliteProTech.user.id.split(':')[0] + '@s.whatsapp.net'
+        const from = ownerNumber
+
+        const chatName = remoteJid.endsWith('@g.us') ? 'Group' : remoteJid
+
+        const note = `╭━━[ *× ANTI DELETE MESSAGES ×* ]━┉
 ┣━ *Deleted:* ${whoDeleted}
 ┣━
 ┣━ *Sender:* ${whoSent}
@@ -1250,31 +1165,18 @@ async function handleAntiDeleteEvent(EliteProTech, targetKey, actorKey = {}) {
 ┣━ *Chat:* ${chatName}
 ╰━━━━━━━━━━━━━━━━━━━━┉`
 
-    await restoreMessage(
-        EliteProTech,
-        from,
-        note,
-        old.message,
-        { key: old.key, message: old.message },
-        [deletedBy, sentBy].filter(jid => jid?.includes('@'))
-    )
-}
+        await restoreMessage(
+            EliteProTech,
+            from,
+            note,
+            old.message,
+            { key: old.key, message: old.message },
+            [deletedBy, sentBy]
+        )
 
-EliteProTech.ev.on('messages.update', async updates => {
-    if (!Array.isArray(updates)) return
-    try {
-        for (const update of updates) {
-            const isDeleted = update.update?.messageStubType === WAMessageStubType.REVOKE ||
-                update.message?.protocolMessage?.type === 0
-            if (!isDeleted) continue
-            // Baileys 7 emits the deleted message's ID on update.key. Its nested
-            // update.key is the revoke notification's own key, not the target.
-            const targetKey = update.message?.protocolMessage?.key || update.key
-            const actorKey = update.update?.key || {}
-            await handleAntiDeleteEvent(EliteProTech, targetKey, actorKey)
-      }
-    } catch (err) {
-        console.error('[ANTI-DELETE] Failed to process deletion update:', err.message)
+        try {
+            fs.unlinkSync(path.join(antiDeleteDir, `${remoteJid}_${msgId}.json`))
+        } catch {}
     }
 })
 
@@ -1282,30 +1184,19 @@ EliteProTech.ev.on('messages.upsert', async chatUpdate => {
     try {
         const { messages, type } = chatUpdate
         if (type !== 'notify') return
-        for (const incomingMessage of messages) {
-            if (!incomingMessage?.message || !incomingMessage?.key?.id) continue
-            const mek = {
-                ...incomingMessage,
-                message: extractMessageContent(incomingMessage.message) || incomingMessage.message
-            }
+        for (const mek of messages) {
+            if (!mek?.message || !mek?.key?.id) continue
             const msgId = mek.key.id
             if (hasProcessedMessage(mek.key)) continue
             markMessageProcessed(mek.key)
             const rawTs = mek.messageTimestamp
             const msgTimestamp = (typeof rawTs === 'object' ? (rawTs?.toNumber?.() ?? rawTs?.low ?? 0) : (rawTs ?? 0)) * 1000
             if (msgTimestamp && msgTimestamp < BOT_START_TIME) continue
-            if (mek.message?.protocolMessage?.type === 0) {
-                try {
-                    await handleAntiDeleteEvent(
-                        EliteProTech,
-                        mek.message.protocolMessage.key,
-                        mek.key || {}
-                    )
-                } catch (err) {
-                    console.error('[ANTI-DELETE] Failed to restore revoked message:', err.message)
-                }
-                continue
-            }
+            mek.message =
+                mek.message?.ephemeralMessage?.message ||
+                mek.message?.viewOnceMessageV2?.message ||
+                mek.message?.viewOnceMessage?.message ||
+                mek.message
             if (mek.message?.protocolMessage || mek.message?.pollUpdateMessage) continue
             const jid = mek.key?.remoteJid
             const isStatus = jid === 'status@broadcast'
@@ -1323,6 +1214,7 @@ EliteProTech.ev.on('messages.upsert', async chatUpdate => {
                 handleAntiLink(EliteProTech, mek)
             }
             if (isNewsletter) handleChannelReact(EliteProTech, mek)
+            handleAntiDeleteCapture(EliteProTech, mek)
             handleAutoReact(EliteProTech, mek)
             handleChatbot(EliteProTech, mek)
         }
@@ -1389,25 +1281,16 @@ EliteProTech.ev.on("connection.update", async (s) => {
         if (reconnecting) return
         reconnecting = true
         if (awaitingNumber && rl && !rl.closed) rl.close()
-        const statusCode = getDisconnectStatus(lastDisconnect)
-        if (statusCode === DisconnectReason.loggedOut) {
+        const statusCode = lastDisconnect.error.output?.statusCode
+        if (statusCode === 401) {
             console.log(chalk.red("❌ Your device was logged out. Please Re-pair."))
-            return
+        } else {
+            if (pairingCodeRequested && !EliteProTech.authState.creds.registered) {
+                console.log(chalk.yellow('Pairing code expired. Please enter your number again.'))
+            }
+            await new Promise(resolve => setTimeout(resolve, 1000))
+            return startEliteProTech()
         }
-        if (statusCode === DisconnectReason.connectionReplaced) {
-            console.log(chalk.red("❌ This session was opened on another instance. Reconnect stopped."))
-            return
-        }
-
-        if (pairingCodeRequested && !state.creds.registered) {
-            console.log(chalk.yellow('Pairing code expired. Please enter your number again.'))
-        }
-
-        const reconnectDelay = statusCode === DisconnectReason.restartRequired ? 0 : 1000
-        if (reconnectDelay) {
-            await new Promise(resolve => setTimeout(resolve, reconnectDelay))
-        }
-        return startEliteProTech()
     }
 })
 EliteProTech.ev.on('creds.update', saveCreds)
@@ -1557,10 +1440,7 @@ function cleanSessionFiles() {
         }
     } catch {}
 }
-if (!sessionCleanupInterval) {
-    sessionCleanupInterval = setInterval(cleanSessionFiles, 8 * 60 * 60 * 1000)
-    sessionCleanupInterval.unref?.()
-}
+setInterval(cleanSessionFiles, 8 * 60 * 60 * 1000);
 ////Sticker code    
     EliteProTech.sendImageAsSticker = async (jid, path, quoted, options = {}) => {
         let buff = Buffer.isBuffer(path) ? path : /^data:.*?\/.*?;base64,/i.test(path) ? Buffer.from(path.split`,` [1], 'base64') : /^https?:\/\//.test(path) ? await (await getBuffer(path)) : fs.existsSync(path) ? fs.readFileSync(path) : Buffer.alloc(0)
@@ -1627,7 +1507,7 @@ if (!sessionCleanupInterval) {
         return buffer
     }
     }
-void startEliteProTech()
+return startEliteProTech()
 
 process.on('uncaughtException', function (err) {
 let e = String(err)
@@ -1641,4 +1521,3 @@ if (e.includes("Timed Out")) return
 if (e.includes("Value not found")) return
 console.log('Caught exception: ', err)
 })
-}
