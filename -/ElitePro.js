@@ -1,64 +1,37 @@
-import os from 'node:os'
-import fs from 'node:fs'
-import path from 'node:path'
-import util from 'node:util'
-import { exec, spawn, execSync } from 'node:child_process'
-import { performance } from 'node:perf_hooks'
-import { fileURLToPath } from 'node:url'
-import { createRequire } from 'node:module'
-import { generateWAMessageContent, generateWAMessageFromContent } from 'baileys'
-import { webp2mp4File } from './lib/uploader.js'
-import { toAudio, toPTT, toVideo, ffmpeg } from './lib/converter.js'
-import { uploadToEliteProTechUrl, uploadToCatbox, uploadToEliteTempUrl } from './lib/urlclouds.js'
-import { smsg, getGroupAdmins, formatp, jam, formatDate, getTime, isUrl, sleep, clockString, runtime, fetchJson, getBuffer, json, logic, generateProfilePicture, parseMention, getRandom, reSize } from './lib/myfunc.js'
-import { checkPremiumUser } from './lib/premium.js'
-import { fetchBuffer, buffergif } from './lib/myfunc2.js'
-
-const require = createRequire(import.meta.url)
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
+const { default: makeWaSocket, useMultiFileAuthState, BufferJSON, WA_DEFAULT_EPHEMERAL, generateWAMessageFromContent, proto, generateWAMessageContent, generateWAMessage, prepareWAMessageMedia, areJidsEliteProTecheUser, getContentType } = require('baileys')
+const os = require('os')
+const fs = require('fs') 
 const fsx = require('fs-extra')
+const path = require('path')
+const util = require('util')
 const chalk = require('chalk')
 const moment = require('moment-timezone')
 const speed = require('performance-now')
-const ms = require('ms')
+const ms = toMs = require('ms')
 const axios = require('axios')
-const FormData = require('form-data')
+const FormData = require("form-data")
 const fetch = require('node-fetch')
 const yts = require('yt-search')
 const { sendButtons, sendInteractiveMessage } = require('gifted-btns')
 const pino = require('pino')
-const { translate } = require('@vitalets/google-translate-api')
+const { exec, spawn, execSync } = require("child_process")
+const {translate} = require('@vitalets/google-translate-api')
 const googleTTS = require('google-tts-api')
-const format = util.format
+const { performance } = require('perf_hooks')
 const more = String.fromCharCode(8206)
 const readmore = more.repeat(4001)
+const { webp2mp4File } = require('./lib/uploader')
+const { toAudio, toPTT, toVideo, ffmpeg, addExifAvatar } = require('./lib/converter')
+const { uploadToEliteProTechUrl, uploadToCatbox, uploadToEliteTempUrl } = require('./lib/urlclouds');
+const { smsg, getGroupAdmins, formatp, jam, formatDate, getTime, isUrl, await, sleep, clockString, msToDate, sort, toNumber, enumGetKey, runtime, fetchJson, getBuffer, json, delay, format, logic, generateProfilePicture, parseMention, getRandom, pickRandom, reSize } = require('./lib/myfunc')
+const { checkPremiumUser } = require('./lib/premium')
+const { fetchBuffer, buffergif } = require("./lib/myfunc2")
 
 //database
-const databaseDir = path.join(__dirname, 'database')
-const ownerFile = path.join(databaseDir, 'owner.json')
-fs.mkdirSync(databaseDir, { recursive: true })
-
-function readOwnerList() {
-    try {
-        const parsed = JSON.parse(fs.readFileSync(ownerFile, 'utf8'))
-        return Array.isArray(parsed) ? parsed : []
-    } catch (error) {
-        if (error.code !== 'ENOENT') console.warn(`[OWNER] Could not read owner list: ${error.message}`)
-        try { fs.writeFileSync(ownerFile, '[]\n', { flag: 'wx' }) } catch {}
-        return []
-    }
-}
-
-let _owner = readOwnerList()
-let owner = [..._owner]
-let elitepropic
-try { elitepropic = fs.readFileSync(path.join(databaseDir, 'elitepropic.jpg')) } catch { elitepropic = null }
-const settingsFile = path.join(databaseDir, 'settings.json')
-
-function writeOwnerList() {
-    fs.writeFileSync(ownerFile, JSON.stringify(owner, null, 2))
-}
+let _owner = JSON.parse(fs.readFileSync('./database/owner.json'))
+let owner = JSON.parse(fs.readFileSync('./database/owner.json'))
+let elitepropic = fs.readFileSync('./database/elitepropic.jpg')
+const settingsFile = './database/settings.json'
 
 function saveSettings() {
     let settings = {}
@@ -87,36 +60,12 @@ function saveSettings() {
 
 function normalizeOwnerId(value) {
     const id = String(value || '').trim().toLowerCase()
-    if (id.includes('@')) return id.replace(/:\d+(?=@)/, '')
+    if (id.endsWith('@lid')) return id.replace(/:\d+(?=@lid$)/, '')
     const digits = id.replace(/\D/g, '')
     return digits ? `${digits}@s.whatsapp.net` : ''
 }
 
-function isLidOwnerId(value) {
-    return value.endsWith('@lid') || value.endsWith('@hosted.lid')
-}
-
-function getIdentitySet(values) {
-    return new Set(values.map(normalizeOwnerId).filter(Boolean))
-}
-
-async function addSignalRepositoryAliases(EliteProTech, identities) {
-    const lids = [...identities].filter(id => id.endsWith('@lid') || id.endsWith('@hosted.lid'))
-    if (!lids.length) return identities
-
-    try {
-        const mappings = await EliteProTech.signalRepository?.lidMapping?.getPNsForLIDs?.(lids)
-        for (const mapping of mappings || []) {
-            const pn = normalizeOwnerId(mapping?.pn)
-            if (pn) identities.add(pn)
-        }
-    } catch (error) {
-        console.warn(`[LID] Signal repository lookup failed: ${error.message}`)
-    }
-    return identities
-}
-
-export default async function EliteProHandler(EliteProTech, m, chatUpdate, store) {
+module.exports = async (EliteProTech, m, chatUpdate, store) => {
     try { const { type, quotedMsg, mentioned, now, fromMe } = m
         var body = (m.mtype === 'conversation') ? m.message.conversation :
            (m.mtype == 'imageMessage') ? m.message.imageMessage.caption :
@@ -171,48 +120,18 @@ export default async function EliteProHandler(EliteProTech, m, chatUpdate, store
         const isQuotedContact = type === 'extendedTextMessage' && content.includes('contactMessage')
         const isQuotedDocument = type === 'extendedTextMessage' && content.includes('documentMessage')
         const isGroup = m.key.remoteJid.endsWith('@g.us')
-        const groupMetadata = m.isGroup ? await EliteProTech.groupMetadata(m.chat).catch(() => ({})) : {}
+        const groupMetadata = m.isGroup ? await EliteProTech.groupMetadata(m.chat).catch(e => {}) : ''
         const groupName = m.isGroup ? groupMetadata.subject : ''
-        const participants = m.isGroup ? groupMetadata?.participants || [] : []
-        const groupAdmins = m.isGroup ? getGroupAdmins(participants) : []
-        const adminIds = getIdentitySet(groupAdmins)
-        const senderIds = getIdentitySet([
-            m.sender,
-            m.key?.participantPn,
-            m.key?.participantAlt,
-            m.key?.participantLid,
-            m.key?.participant,
-            m.key?.senderPn,
-            m.key?.senderLid,
-            m.participant
-        ])
-        for (const participant of participants) {
-            const participantIds = getIdentitySet([
-                participant?.id,
-                participant?.jid,
-                participant?.pn,
-                participant?.phoneNumber,
-                participant?.lid
-            ])
-            if ([...participantIds].some(id => senderIds.has(id))) {
-                for (const id of participantIds) senderIds.add(id)
-            }
-        }
-        await Promise.all([
-            addSignalRepositoryAliases(EliteProTech, adminIds),
-            addSignalRepositoryAliases(EliteProTech, senderIds)
-        ])
-        const isBotAdmins = m.isGroup && [botNumber, EliteProTech.user?.id, EliteProTech.user?.lid]
-            .some(id => adminIds.has(normalizeOwnerId(id)))
-        const isAdmins = m.isGroup && [...senderIds].some(id => adminIds.has(id))
-        const groupOwnerIds = getIdentitySet([groupMetadata?.owner, groupMetadata?.ownerPn])
-        await addSignalRepositoryAliases(EliteProTech, groupOwnerIds)
-        const isGroupOwner = m.isGroup && [...senderIds].some(id => groupOwnerIds.has(id))
+        const participants = m.isGroup ? await groupMetadata.participants : ''
+        const groupAdmins = m.isGroup ? await getGroupAdmins(participants) : ''
+        const isBotAdmins = m.isGroup ? groupAdmins.includes(botNumber) : false
+        const isAdmins = m.isGroup ? groupAdmins.includes(m.sender) : false
+        const groupOwner = m.isGroup ? groupMetadata.owner : ''
+        const isGroupOwner = m.isGroup ? (groupOwner ? groupOwner : groupAdmins).includes(m.sender) : false
         const cleanLid = EliteProTech.user?.lid ? EliteProTech.user.lid.replace(/:\d+/, '') : '';
         const cleanId = EliteProTech.user?.id ? EliteProTech.user.id.replace(/:\d+/, '') : '';
-        const ownerIds = getIdentitySet([..._owner, cleanLid, cleanId])
-        await addSignalRepositoryAliases(EliteProTech, ownerIds)
-        const isCreator = [...senderIds].some(id => ownerIds.has(id)) || m.key?.fromMe === true
+        const ownerIds = [..._owner, cleanLid, cleanId].map(normalizeOwnerId).filter(Boolean)
+        const isCreator = ownerIds.includes(normalizeOwnerId(m.sender))
         
 const reply = (teks) => {
     EliteProTech.sendMessage(
@@ -1861,6 +1780,7 @@ case 'tts': {
     try {
         const axios = require('axios')
         const googleTTS = require('google-tts-api')
+        const { toPTT } = require('./lib/converter')
 
         const url = googleTTS.getAudioUrl(text, {
             lang: 'en',
@@ -7052,7 +6972,7 @@ case 'qrscan': {
 
     try {
         const jsQR = require('jsqr')
-        const { Jimp } = require('jimp')
+        const Jimp = require('jimp')
 
         const mime = m.quoted.mimetype || m.quoted.msg?.mimetype || ''
         if (!/image/.test(mime)) return reply('Reply to an image that contains a QR code')
@@ -7419,7 +7339,7 @@ case 'setfullprofilepicture': {
 
     try {
         const JimpModule = require('jimp')
-        const { Jimp, JimpMime } = JimpModule
+        const Jimp = JimpModule.Jimp || JimpModule
 
         await EliteProTech.sendMessage(m.chat, {
             react: { text: '🖼️', key: m.key }
@@ -7428,13 +7348,9 @@ case 'setfullprofilepicture': {
         const media = await m.quoted.download()
         const image = await Jimp.read(media)
 
-        const scale = Math.min(720 / image.width, 720 / image.height, 1)
-        image.resize({
-            w: Math.max(1, Math.round(image.width * scale)),
-            h: Math.max(1, Math.round(image.height * scale))
-        })
+        image.scaleToFit(720, 720)
 
-        const img = await image.getBuffer(JimpMime.jpeg)
+        const img = await image.getBufferAsync(Jimp.MIME_JPEG)
 
         await EliteProTech.query({
             tag: 'iq',
@@ -9494,6 +9410,9 @@ if (!/video/.test(mime) && !/audio/.test(mime)) return reply(`Send/Reply Video/A
                 if (!/video/.test(mime) && !/audio/.test(mime)) return reply(`Reply Video/Audio that you want to make into a VN with caption ${prefix + command}`)
                 reply(mess.wait)
                 let media = await EliteProTech.downloadMediaMessage(qmsg)
+                let {
+                    toPTT
+                } = require('./lib/converter')
                 let audio = await toPTT(media, 'mp4')
                 EliteProTech.sendMessage(m.chat, {
                     audio: audio,
@@ -9649,9 +9568,9 @@ if (!isCreator) return reply(mess.owner)
 const rawOwner = q.split("|")[0].trim().toLowerCase()
 if (!rawOwner) return reply(`Use ${prefix + command} number or LID\nExamples:\n${prefix + command} 2347047504860\n${prefix + command} 123456789@lid`)
 let ownerId
-if (isLidOwnerId(rawOwner)) {
+if (rawOwner.endsWith('@lid')) {
     ownerId = normalizeOwnerId(rawOwner)
-    if (!/^\d+@(?:hosted\.)?lid$/.test(ownerId)) return reply('Use a valid LID, for example: 123456789@lid')
+    if (!/^\d+@lid$/.test(ownerId)) return reply('Use a valid LID, for example: 123456789@lid')
 } else {
     ownerId = rawOwner.replace(/[^0-9]/g, '')
     if (!ownerId) return reply('Use a valid phone number or LID')
@@ -9661,7 +9580,7 @@ if (isLidOwnerId(rawOwner)) {
 if (owner.includes(ownerId)) return reply('That owner is already added')
 owner.push(ownerId)
 _owner.push(ownerId)
-writeOwnerList()
+fs.writeFileSync('./database/owner.json', JSON.stringify(owner, null, 2))
 reply(`✅ ${ownerId} is now an owner`)
 }
 break
@@ -9669,13 +9588,13 @@ case 'delowner': case 'deletesudo': case 'deleteowner': {
 if (!isCreator) return reply(mess.owner)
 const rawOwner = q.split("|")[0].trim().toLowerCase()
 if (!rawOwner) return reply(`Use ${prefix + command} number or LID`)
-const ownerId = isLidOwnerId(rawOwner) ? normalizeOwnerId(rawOwner) : rawOwner.replace(/[^0-9]/g, '')
+const ownerId = rawOwner.endsWith('@lid') ? normalizeOwnerId(rawOwner) : rawOwner.replace(/[^0-9]/g, '')
 const index = owner.indexOf(ownerId)
 if (index === -1) return reply('That owner was not found')
 owner.splice(index, 1)
 const cacheIndex = _owner.indexOf(ownerId)
 if (cacheIndex !== -1) _owner.splice(cacheIndex, 1)
-writeOwnerList()
+fs.writeFileSync('./database/owner.json', JSON.stringify(owner, null, 2))
 reply(`✅ ${ownerId} was removed from the owner list`)
 }
 break
@@ -9971,6 +9890,14 @@ break
 console.log(util.format(err))
 } 
 }
+
+let file = require.resolve(__filename)
+fs.watchFile(file, () => {
+    fs.unwatchFile(file)
+    console.log(chalk.redBright(`Update ${__filename}`))
+    delete require.cache[file]
+    require(file)
+})
 
 process.on('uncaughtException', function(err) {
     let e = String(err)
